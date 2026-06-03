@@ -4,7 +4,7 @@ import (
 	"encoding/hex"
 	"strings"
 
-	log "github.com/sirupsen/logrus"
+	"github.com/danielpaulus/go-ios/ios/golog"
 )
 
 // sadly apple does not use a standard compliant zip implementation for this
@@ -67,7 +67,7 @@ func init() {
 	extra, err := hex.DecodeString(s)
 	zipExtraBytes = extra
 	if err != nil {
-		log.Fatal("this is impossible to break", err)
+		golog.Fatal("this is impossible to break", "error", err)
 	}
 }
 

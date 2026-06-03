@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/danielpaulus/go-ios/ios"
+	"github.com/danielpaulus/go-ios/ios/golog"
 	"github.com/lunixbochs/struc"
-	log "github.com/sirupsen/logrus"
 	"howett.net/plist"
 )
 
@@ -70,7 +70,7 @@ func Start(device ios.DeviceEntry) error {
 		return err
 	}
 	defer f.Close()
-	log.Info("Create pcap file: ", fname)
+	golog.Info("create pcap file", "path", fname)
 	for {
 		b, err := plistCodec.Decode(intf.Reader())
 		if err != nil {

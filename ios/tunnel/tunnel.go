@@ -17,11 +17,10 @@ import (
 	"time"
 
 	"github.com/danielpaulus/go-ios/ios"
+	"github.com/danielpaulus/go-ios/ios/golog"
 	"github.com/danielpaulus/go-ios/ios/http"
 
 	"github.com/quic-go/quic-go"
-	"github.com/sirupsen/logrus"
-	log "github.com/sirupsen/logrus"
 )
 
 // Tunnel describes the parameters of an established tunnel to the device
@@ -46,7 +45,7 @@ func (t Tunnel) Close() error {
 // ManualPairAndConnectToTunnel tries to verify an existing pairing, and if this fails it triggers a new manual pairing process.
 // After a successful pairing a tunnel for this device gets started and the tunnel information is returned
 func ManualPairAndConnectToTunnel(ctx context.Context, device ios.DeviceEntry, p PairRecordManager) (Tunnel, error) {
-	log.Info("ManualPairAndConnectToTunnel: starting manual pairing and tunnel connection, dont forget to stop remoted first with 'sudo pkill -SIGSTOP remoted' and run this with sudo.")
+	golog.Info("ManualPairAndConnectToTunnel: starting manual pairing and tunnel connection, dont forget to stop remoted first with 'sudo pkill -SIGSTOP remoted' and run this with sudo.")
 	addr, err := ios.FindDeviceInterfaceAddress(ctx, device)
 	if err != nil {
 		return Tunnel{}, fmt.Errorf("ManualPairAndConnectToTunnel: failed to find device ethernet interface: %w", err)
@@ -105,7 +104,7 @@ func getUntrustedTunnelServicePort(addr string, device ios.DeviceEntry) (int, er
 }
 
 func connectToTunnel(ctx context.Context, info tunnelListener, addr string, device ios.DeviceEntry) (Tunnel, error) {
-	logrus.WithField("address", addr).WithField("port", info.TunnelPort).Info("connect to tunnel endpoint on device")
+	golog.Info("connect to tunnel endpoint on device", "address", addr, "port", info.TunnelPort)
 
 	conf, err := createTlsConfig(info)
 	if err != nil {
@@ -148,14 +147,14 @@ func connectToTunnel(ctx context.Context, info tunnelListener, addr string, devi
 	go func() {
 		err := forwardDataToInterface(tunnelCtx, conn, utunIface)
 		if err != nil {
-			logrus.WithError(err).Error("failed to forward data to tunnel interface")
+			golog.Error("failed to forward data to tunnel interface", "error", err)
 		}
 	}()
 
 	go func() {
 		err := forwardDataToDevice(tunnelCtx, tunnelInfo.ClientParameters.Mtu, utunIface, conn)
 		if err != nil {
-			logrus.WithError(err).Error("failed to forward data to the device")
+			golog.Error("failed to forward data to the device", "error", err)
 		}
 	}()
 

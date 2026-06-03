@@ -7,7 +7,7 @@ import (
 
 	"github.com/danielpaulus/go-ios/ios"
 	"github.com/danielpaulus/go-ios/ios/afc"
-	log "github.com/sirupsen/logrus"
+	"github.com/danielpaulus/go-ios/ios/golog"
 )
 
 const (
@@ -47,7 +47,7 @@ func RemoveReports(device ios.DeviceEntry, cwd string, pattern string) error {
 	if pattern == "" {
 		return fmt.Errorf("empty pattern not ok, just use *")
 	}
-	log.WithFields(log.Fields{"cwd": cwd, "pattern": pattern}).Info("deleting")
+	golog.Info("deleting", "cwd", cwd, "pattern", pattern)
 	err := moveReports(device)
 	if err != nil {
 		return err
@@ -97,12 +97,12 @@ func ListReports(device ios.DeviceEntry, pattern string) ([]string, error) {
 }
 
 func moveReports(device ios.DeviceEntry) error {
-	log.Debug("moving crashreports")
+	golog.Debug("moving crashreports")
 	conn, err := newMover(device)
 	if err != nil {
 		return err
 	}
-	log.Debug("connected to mover, awaiting ping")
+	golog.Debug("connected to mover, awaiting ping")
 	ping := make([]byte, 4)
 	_, err = conn.deviceConn.Reader().Read(ping)
 	if err != nil {
@@ -111,7 +111,7 @@ func moveReports(device ios.DeviceEntry) error {
 	if "ping" != string(ping) {
 		return fmt.Errorf("did not receive ping from crashreport mover: %x", ping)
 	}
-	log.Debug("ping received")
+	golog.Debug("ping received")
 	return nil
 }
 

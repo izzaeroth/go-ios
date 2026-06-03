@@ -6,7 +6,7 @@ import (
 	"io"
 	"sync/atomic"
 
-	log "github.com/sirupsen/logrus"
+	"github.com/danielpaulus/go-ios/ios/golog"
 	"golang.org/x/net/http2"
 )
 
@@ -68,8 +68,7 @@ func NewHttpConnection(rw io.ReadWriteCloser) (*HttpConnection, error) {
 			return nil, fmt.Errorf("NewHttpConnection: could not write settings ack. %w", err)
 		}
 	} else {
-		log.WithField("frame", frame.Header().String()).
-			Warn("expected setttings frame")
+		golog.Warn("expected setttings frame", "frame", frame.Header().String())
 	}
 
 	return &HttpConnection{

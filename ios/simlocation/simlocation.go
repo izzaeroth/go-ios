@@ -12,7 +12,7 @@ import (
 	"time"
 
 	ios "github.com/danielpaulus/go-ios/ios"
-	log "github.com/sirupsen/logrus"
+	"github.com/danielpaulus/go-ios/ios/golog"
 )
 
 const serviceName string = "com.apple.dt.simulatelocation"
@@ -66,8 +66,7 @@ func SetLocation(device ios.DeviceEntry, lat string, lon string) error {
 	data.lat = latitude
 	data.lon = longitude
 
-	log.WithFields(log.Fields{"latitude": latitude, "longitude": longitude}).
-		Info("Simulating device location")
+	golog.Info("Simulating device location", "latitude", latitude, "longitude", longitude)
 
 	// Generate the byte data needed by the service to set the location
 	locationBytes, err := data.LocationBytes()

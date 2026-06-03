@@ -12,10 +12,9 @@ import (
 	"time"
 
 	"github.com/danielpaulus/go-ios/ios"
+	"github.com/danielpaulus/go-ios/ios/golog"
 	"github.com/danielpaulus/go-ios/ios/installationproxy"
 	"howett.net/plist"
-
-	log "github.com/sirupsen/logrus"
 )
 
 const (
@@ -148,7 +147,7 @@ func connectToDevice(device ios.DeviceEntry) (ios.DeviceConnectionInterface, err
 	}
 	version, ok := info["ProductVersion"]
 	if !ok {
-		log.Error("cannot find version, default use ssl debug server")
+		golog.Error("cannot find version, default use ssl debug server")
 		return ios.ConnectToService(device, sslServiceName)
 	}
 	if version.(string) > "14" {
@@ -192,25 +191,25 @@ func Start(device ios.DeviceEntry, appPath string, stopAtEntry bool) error {
 	// listen at random port
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		log.Fatal(err)
+		golog.Fatal("failed to listen", "error", err)
 	}
 	defer listener.Close()
 	port := listener.Addr().(*net.TCPAddr).Port
-	log.Info("debug proxy listen port: ", port)
+	golog.Info("debug proxy listening", "port", port)
 	go func() {
 		time.Sleep(time.Second)
 		err := startLLDB(appPath, container, port, stopAtEntry)
 		if err != nil {
-			log.Fatal(err)
+			golog.Fatal("lldb failed", "error", err)
 		} else {
 			// exit without error
-			log.Exit(0)
+			os.Exit(0)
 		}
 	}()
 	for {
 		localConn, err := listener.Accept()
 		if err != nil {
-			log.Error(err)
+			golog.Error("accept failed", "error", err)
 			continue
 		}
 		go func() {

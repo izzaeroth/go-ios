@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/danielpaulus/go-ios/ios"
-	log "github.com/sirupsen/logrus"
+	"github.com/danielpaulus/go-ios/ios/golog"
 )
 
 const (
@@ -306,7 +306,7 @@ func (c *Connection) startActivity(pid int, messageFilter uint16, streamFlags ui
 		return fmt.Errorf("ostrace: StartActivity failed, response: %v", response)
 	}
 
-	log.Debug("ostrace: StartActivity handshake successful")
+	golog.Debug("ostrace: StartActivity handshake successful")
 	return nil
 }
 

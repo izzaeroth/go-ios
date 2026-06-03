@@ -14,7 +14,7 @@ import (
 
 	"github.com/Masterminds/semver"
 
-	log "github.com/sirupsen/logrus"
+	"github.com/danielpaulus/go-ios/ios/golog"
 	plist "howett.net/plist"
 )
 
@@ -105,10 +105,10 @@ func GetDeviceWithAddress(udid string, address string, provider RsdPortProvider)
 	if udid == "" {
 		udid = os.Getenv("udid")
 		if udid != "" {
-			log.Info("using udid from env.udid variable")
+			golog.Info("using udid from env.udid variable")
 		}
 	}
-	log.Debugf("Looking for device '%s'", udid)
+	golog.Debug("Looking for device", "udid", udid)
 	deviceList, err := ListDevices()
 	if err != nil {
 		return DeviceEntry{}, err
@@ -118,8 +118,7 @@ func GetDeviceWithAddress(udid string, address string, provider RsdPortProvider)
 			return DeviceEntry{}, errors.New("no iOS devices are attached to this host")
 		}
 		device := deviceList.DeviceList[0]
-		log.WithFields(log.Fields{"udid": device.Properties.SerialNumber}).
-			Info("no udid specified using first device in list")
+		golog.Info("no udid specified using first device in list", "udid", device.Properties.SerialNumber)
 		device.Address = address
 		device.Rsd = provider
 		return device, nil

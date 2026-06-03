@@ -3,11 +3,12 @@ package notificationproxy
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
 	ios "github.com/danielpaulus/go-ios/ios"
-	log "github.com/sirupsen/logrus"
+	"github.com/danielpaulus/go-ios/ios/golog"
 	"howett.net/plist"
 )
 
@@ -24,15 +25,15 @@ type Connection struct {
 
 // Close sends a Shutdown command to notification proxy and closes the DeviceConnectionInterface
 func (c *Connection) Close() {
-	log.Debugf("shutting down %s", serviceName)
+	golog.Debug("shutting down", "service", serviceName)
 	request := notificationProxyRequest{Command: "Shutdown"}
 	bytes, err := c.plistCodec.Encode(request)
 	if err != nil {
-		log.Debug(err)
+		golog.Debug("failed encoding shutdown request", "error", err)
 	}
 	err = c.deviceConn.Send(bytes)
 	if err != nil {
-		log.Debug(err)
+		golog.Debug("failed sending shutdown request", "error", err)
 	}
 	c.deviceConn.Close()
 }
@@ -61,7 +62,7 @@ func WaitUntilSpringboardStarted(device ios.DeviceEntry) error {
 }
 
 func read(c *Connection) error {
-	log.Debug("notificationproxy start reading")
+	golog.Debug("notificationproxy start reading")
 	reader := c.deviceConn.Reader()
 	for {
 		messageBytes, err := c.plistCodec.Decode(reader)
@@ -72,7 +73,7 @@ func read(c *Connection) error {
 		if err != nil {
 			return err
 		}
-		log.Debugf("NotificationProxy: %+v", message)
+		golog.Debug("NotificationProxy message", "message", message)
 		if command, ok := message["Command"].(string); ok {
 			switch command {
 			case "RelayNotification":
@@ -81,10 +82,10 @@ func read(c *Connection) error {
 				var signal interface{}
 				c.proxyDeathChannel <- signal
 			default:
-				log.Debugf("Unknown message: %x", messageBytes)
+				golog.Debug("unknown message", "bytes", fmt.Sprintf("%x", messageBytes))
 			}
 		} else {
-			log.Debugf("Unknown message: %x", messageBytes)
+			golog.Debug("unknown message", "bytes", fmt.Sprintf("%x", messageBytes))
 		}
 	}
 }

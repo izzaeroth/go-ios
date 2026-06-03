@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/danielpaulus/go-ios/ios"
+	"github.com/danielpaulus/go-ios/ios/golog"
 	"github.com/danielpaulus/go-ios/ios/imagemounter"
-	log "github.com/sirupsen/logrus"
 )
 
 const serviceName string = "com.apple.amfi.lockdown"
@@ -153,7 +153,7 @@ func EnableDeveloperMode(device ios.DeviceEntry, enablePostRestart bool) error {
 	}
 
 	if devModeEnabled {
-		log.Info("Developer mode is already enabled on the device")
+		golog.Info("Developer mode is already enabled on the device")
 		return nil
 	}
 
@@ -174,10 +174,10 @@ func EnableDeveloperMode(device ios.DeviceEntry, enablePostRestart bool) error {
 		}
 		return fmt.Errorf("EnableDeveloperMode: failed enabling developer mode with err: %w (Developer Mode menu has been revealed in Settings)", err)
 	}
-	log.Infof("Successfully enabled developer mode on device `%s`, device will restart", device.Properties.SerialNumber)
+	golog.Info("Successfully enabled developer mode on device, device will restart", "udid", device.Properties.SerialNumber)
 
 	udid := device.Properties.SerialNumber
-	log.Info("Waiting for device to restart after enabling developer mode")
+	golog.Info("Waiting for device to restart after enabling developer mode")
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
@@ -188,7 +188,7 @@ WaitLoop:
 		case <-ticker.C:
 			device, err = ios.GetDevice(udid)
 			if err != nil {
-				log.Info("Device is not yet available")
+				golog.Info("Device is not yet available")
 				continue WaitLoop
 			}
 			break WaitLoop
@@ -199,11 +199,11 @@ WaitLoop:
 			}
 		}
 	}
-	log.Info("Device was successfully restarted after enabling developer mode")
+	golog.Info("Device was successfully restarted after enabling developer mode")
 
 	// Try to also enable dev mode after the device restarts - skips the system popup that asks you to finalize dev mode enablement
 	if enablePostRestart {
-		log.Info("Will attempt to enable developer mode post restart")
+		golog.Info("Will attempt to enable developer mode post restart")
 		conn, err = New(device)
 		if err != nil {
 			return fmt.Errorf("EnableDeveloperMode: failed connecting to amfi service post restart with err: %w", err)
@@ -213,7 +213,7 @@ WaitLoop:
 		if err != nil {
 			return fmt.Errorf("EnableDeveloperMode: failed enabling developer mode post restart, you need to finish the set up manually through the popup on the device, err: %w", err)
 		}
-		log.Info("Successfully enabled developer mode on device post restart")
+		golog.Info("Successfully enabled developer mode on device post restart")
 	}
 
 	return nil

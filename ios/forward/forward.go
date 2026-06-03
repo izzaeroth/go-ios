@@ -8,7 +8,7 @@ import (
 	"sync"
 
 	"github.com/danielpaulus/go-ios/ios"
-	log "github.com/sirupsen/logrus"
+	"github.com/danielpaulus/go-ios/ios/golog"
 )
 
 type iosproxy struct {
@@ -30,7 +30,7 @@ func Forward(device ios.DeviceEntry, hostPort uint16, phonePort uint16) (*ConnLi
 	if phonePort == 0 {
 		return nil, fmt.Errorf("forward: invalid target port: port must be at least 1")
 	}
-	log.Infof("Start listening on port %d forwarding to port %d on device", hostPort, phonePort)
+	golog.Info("start listening, forwarding to device", "hostPort", hostPort, "phonePort", phonePort)
 	l, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", hostPort))
 	if err != nil {
 		return nil, fmt.Errorf("forward: failed listener with err: %w", err)
@@ -61,15 +61,15 @@ func connectionAccept(cl *ConnListener, deviceID int, phonePort uint16) {
 	for {
 		select {
 		case <-cl.quit:
-			log.WithFields(log.Fields{"phonePort": phonePort}).Info("closed listener successfully")
+			golog.Info("closed listener successfully", "phonePort", phonePort)
 			return
 		default:
 			clientConn, err := cl.listener.Accept()
 			if err != nil {
-				log.Errorf("Error accepting new connection %v", err)
+				golog.Error("error accepting new connection", "error", err)
 				continue
 			}
-			log.WithFields(log.Fields{"conn": fmt.Sprintf("%#v", cl)}).Info("new client connected")
+			golog.Info("new client connected", "conn", fmt.Sprintf("%#v", cl))
 			go StartNewProxyConnection(context.TODO(), clientConn, deviceID, phonePort)
 		}
 	}
@@ -78,17 +78,17 @@ func connectionAccept(cl *ConnListener, deviceID int, phonePort uint16) {
 func StartNewProxyConnection(ctx context.Context, clientConn io.ReadWriteCloser, deviceID int, phonePort uint16) error {
 	usbmuxConn, err := ios.NewUsbMuxConnectionSimple()
 	if err != nil {
-		log.Errorf("could not connect to usbmuxd: %+v", err)
+		golog.Error("could not connect to usbmuxd", "error", err)
 		clientConn.Close()
 		return fmt.Errorf("could not connect to usbmuxd: %v", err)
 	}
 	muxError := usbmuxConn.Connect(deviceID, phonePort)
 	if muxError != nil {
-		log.WithFields(log.Fields{"conn": fmt.Sprintf("%#v", clientConn), "err": muxError, "phonePort": phonePort}).Infof("could not connect to phone")
+		golog.Info("could not connect to phone", "conn", fmt.Sprintf("%#v", clientConn), "error", muxError, "phonePort", phonePort)
 		clientConn.Close()
 		return fmt.Errorf("could not connect to port:%d on iOS: %v", phonePort, err)
 	}
-	log.WithFields(log.Fields{"conn": fmt.Sprintf("%#v", clientConn), "phonePort": phonePort}).Infof("Connected to port")
+	golog.Info("connected to port", "conn", fmt.Sprintf("%#v", clientConn), "phonePort", phonePort)
 	deviceConn := usbmuxConn.ReleaseDeviceConnection()
 
 	// proxyConn := iosproxy{clientConn, deviceConn}
@@ -106,7 +106,7 @@ func StartNewProxyConnection(ctx context.Context, clientConn io.ReadWriteCloser,
 			closed = true
 		}
 
-		log.Errorf("forward: close clientConn <-- deviceConn")
+		golog.Error("forward: close clientConn <-- deviceConn")
 		wg.Done()
 	}()
 
@@ -120,7 +120,7 @@ func StartNewProxyConnection(ctx context.Context, clientConn io.ReadWriteCloser,
 			closed = true
 		}
 
-		log.Errorf("forward: close clientConn --> deviceConn")
+		golog.Error("forward: close clientConn --> deviceConn")
 		wg.Done()
 	}()
 

@@ -4,7 +4,7 @@ package afc
 import (
 	"fmt"
 	"github.com/danielpaulus/go-ios/ios"
-	log "github.com/sirupsen/logrus"
+	"github.com/danielpaulus/go-ios/ios/golog"
 	"path"
 	"testing"
 )
@@ -16,12 +16,12 @@ func TestConnection_Remove(t *testing.T) {
 
 	conn, err := New(deviceEnrty)
 	if err != nil {
-		log.Fatalf("connect service failed: %v", err)
+		golog.Fatal("connect service failed", "error", err)
 	}
 
 	err = conn.Remove("/DCIM/fsync.go")
 	if err != nil {
-		log.Fatalf("remove failed:%v", err)
+		golog.Fatal("remove failed", "error", err)
 	}
 }
 
@@ -30,12 +30,12 @@ func TestConnection_RemoveAll(t *testing.T) {
 
 	conn, err := New(deviceEnrty)
 	if err != nil {
-		log.Fatalf("connect service failed: %v", err)
+		golog.Fatal("connect service failed", "error", err)
 	}
 
 	err = conn.RemoveAll("/DCIM/TestDir")
 	if err != nil {
-		log.Fatalf("remove failed:%v", err)
+		golog.Fatal("remove failed", "error", err)
 	}
 }
 
@@ -44,12 +44,12 @@ func TestConnection_Mkdir(t *testing.T) {
 
 	conn, err := New(deviceEnrty)
 	if err != nil {
-		log.Fatalf("connect service failed: %v", err)
+		golog.Fatal("connect service failed", "error", err)
 	}
 
 	err = conn.MkDir("/DCIM/TestDir")
 	if err != nil {
-		log.Fatalf("mkdir failed:%v", err)
+		golog.Fatal("mkdir failed", "error", err)
 	}
 }
 
@@ -58,14 +58,14 @@ func TestConnection_stat(t *testing.T) {
 
 	conn, err := New(deviceEnrty)
 	if err != nil {
-		log.Fatalf("connect service failed: %v", err)
+		golog.Fatal("connect service failed", "error", err)
 	}
 
 	si, err := conn.Stat("/DCIM/architecture_diagram.png")
 	if err != nil {
-		log.Fatalf("get Stat failed:%v", err)
+		golog.Fatal("get Stat failed", "error", err)
 	}
-	log.Printf("Stat :%+v", si)
+	golog.Info("stat result", "stat", si)
 }
 
 func TestConnection_listDir(t *testing.T) {
@@ -73,12 +73,12 @@ func TestConnection_listDir(t *testing.T) {
 
 	conn, err := New(deviceEnrty)
 	if err != nil {
-		log.Fatalf("connect service failed: %v", err)
+		golog.Fatal("connect service failed", "error", err)
 	}
 
 	flist, err := conn.listDir("/DCIM/")
 	if err != nil {
-		log.Fatalf("tree view failed:%v", err)
+		golog.Fatal("tree view failed", "error", err)
 	}
 	for _, v := range flist {
 		fmt.Printf("path: %+v\n", v)
@@ -90,12 +90,12 @@ func TestConnection_TreeView(t *testing.T) {
 
 	conn, err := New(deviceEnrty)
 	if err != nil {
-		log.Fatalf("connect service failed: %v", err)
+		golog.Fatal("connect service failed", "error", err)
 	}
 
 	err = conn.TreeView("/DCIM/", "", true)
 	if err != nil {
-		log.Fatalf("tree view failed:%v", err)
+		golog.Fatal("tree view failed", "error", err)
 	}
 }
 
@@ -104,12 +104,12 @@ func TestConnection_pullSingleFile(t *testing.T) {
 
 	conn, err := New(deviceEnrty)
 	if err != nil {
-		log.Fatalf("connect service failed: %v", err)
+		golog.Fatal("connect service failed", "error", err)
 	}
 
 	err = conn.PullSingleFile("/DCIM/architecture_diagram.png", "architecture_diagram.png")
 	if err != nil {
-		log.Fatalf("pull single file failed:%v", err)
+		golog.Fatal("pull single file failed", "error", err)
 	}
 }
 
@@ -118,14 +118,14 @@ func TestConnection_Pull(t *testing.T) {
 
 	conn, err := New(deviceEnrty)
 	if err != nil {
-		log.Fatalf("connect service failed: %v", err)
+		golog.Fatal("connect service failed", "error", err)
 	}
 	srcPath := "/DCIM/"
 	dstpath := "TempRecv"
 	dstpath = path.Join(dstpath, srcPath)
 	err = conn.Pull(srcPath, dstpath)
 	if err != nil {
-		log.Fatalf("pull failed:%v", err)
+		golog.Fatal("pull failed", "error", err)
 	}
 }
 
@@ -133,7 +133,7 @@ func TestConnection_Push(t *testing.T) {
 	deviceEnrty, _ := ios.GetDevice(test_device_udid)
 	conn, err := New(deviceEnrty)
 	if err != nil {
-		log.Fatalf("connect service failed: %v", err)
+		golog.Fatal("connect service failed", "error", err)
 	}
 
 	srcPath := "fsync.go"
@@ -141,7 +141,7 @@ func TestConnection_Push(t *testing.T) {
 
 	err = conn.Push(srcPath, dstpath)
 	if err != nil {
-		log.Fatalf("push failed:%v", err)
+		golog.Fatal("push failed", "error", err)
 	}
 }
 */

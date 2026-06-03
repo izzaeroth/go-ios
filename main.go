@@ -9,6 +9,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path"
@@ -48,6 +49,7 @@ import (
 	"github.com/danielpaulus/go-ios/ios/accessibility"
 	"github.com/danielpaulus/go-ios/ios/diagnostics"
 	"github.com/danielpaulus/go-ios/ios/forward"
+	"github.com/danielpaulus/go-ios/ios/golog"
 	"github.com/danielpaulus/go-ios/ios/installationproxy"
 	"github.com/danielpaulus/go-ios/ios/instruments"
 	"github.com/danielpaulus/go-ios/ios/mcinstall"
@@ -57,7 +59,6 @@ import (
 	"github.com/danielpaulus/go-ios/ios/springboard"
 	syslog "github.com/danielpaulus/go-ios/ios/syslog"
 	"github.com/docopt/docopt-go"
-	log "github.com/sirupsen/logrus"
 )
 
 // JSONdisabled enables or disables output in JSON format
@@ -457,8 +458,6 @@ The commands work as following:
 	disableJSON, _ := arguments.Bool("--nojson")
 	if disableJSON {
 		JSONdisabled = true
-	} else {
-		log.SetFormatter(&log.JSONFormatter{})
 	}
 
 	pretty, _ := arguments.Bool("--pretty")
@@ -466,21 +465,48 @@ The commands work as following:
 		prettyJSON = true
 	}
 
+	// Build a single slog logger from the flags and install it as the
+	// process-wide logger for all ios/** packages via ios.SetLogger.
 	traceLevelEnabled, _ := arguments.Bool("--trace")
-	if traceLevelEnabled {
-		log.Info("Set Trace mode")
-		log.SetLevel(log.TraceLevel)
-	} else {
+	verboseLoggingEnabledLong, _ := arguments.Bool("--verbose")
 
-		verboseLoggingEnabledLong, _ := arguments.Bool("--verbose")
-
-		if verboseLoggingEnabledLong {
-			log.Info("Set Debug mode")
-			log.SetLevel(log.DebugLevel)
-		}
+	level := slog.LevelInfo
+	if verboseLoggingEnabledLong {
+		level = slog.LevelDebug
 	}
-	// log.SetReportCaller(true)
-	log.Debug(arguments)
+	if traceLevelEnabled {
+		// trace wins over verbose
+		level = ios.LevelTrace
+	}
+
+	handlerOpts := &slog.HandlerOptions{
+		Level: level,
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			// slog renders our custom trace level as "DEBUG-4"; rename it to "TRACE".
+			if a.Key == slog.LevelKey {
+				if lvl, ok := a.Value.Any().(slog.Level); ok && lvl == ios.LevelTrace {
+					a.Value = slog.StringValue("TRACE")
+				}
+			}
+			return a
+		},
+	}
+
+	var handler slog.Handler
+	if disableJSON {
+		// --nojson mirrors the old logrus TextFormatter default.
+		handler = slog.NewTextHandler(os.Stderr, handlerOpts)
+	} else {
+		handler = slog.NewJSONHandler(os.Stderr, handlerOpts)
+	}
+	ios.SetLogger(slog.New(handler))
+
+	if traceLevelEnabled {
+		golog.Info("Set Trace mode")
+	} else if verboseLoggingEnabledLong {
+		golog.Info("Set Debug mode")
+	}
+	golog.Debug("parsed arguments", "args", arguments)
 
 	skipAgent, _ := os.LookupEnv("ENABLE_GO_IOS_AGENT")
 	if skipAgent == "user" || skipAgent == "kernel" {
@@ -488,7 +514,7 @@ The commands work as following:
 	}
 
 	if !tunnel.IsAgentRunning() {
-		log.Warn("go-ios agent is not running. You might need to start it with 'ios tunnel start' for ios17+. Use ENABLE_GO_IOS_AGENT=user for userspace tunnel or ENABLE_GO_IOS_AGENT=kernel for kernel tunnel for the experimental daemon mode.")
+		golog.Warn("go-ios agent is not running. You might need to start it with 'ios tunnel start' for ios17+. Use ENABLE_GO_IOS_AGENT=user for userspace tunnel or ENABLE_GO_IOS_AGENT=kernel for kernel tunnel for the experimental daemon mode.")
 	}
 	shouldPrintVersionNoDashes, _ := arguments.Bool("version")
 	shouldPrintVersion, _ := arguments.Bool("--version")
@@ -561,7 +587,7 @@ The commands work as following:
 				device.UserspaceTUN = info.UserspaceTUN
 				device = deviceWithRsdProvider(device, udid, info.Address, info.RsdPort)
 			} else {
-				log.WithField("udid", device.Properties.SerialNumber).Warn("failed to get tunnel info")
+				golog.Warn("failed to get tunnel info", "udid", device.Properties.SerialNumber)
 			}
 		}
 	}
@@ -570,13 +596,13 @@ The commands work as following:
 	if b {
 		force, _ := arguments.Bool("--force")
 		if !force {
-			log.Warnf("are you sure you want to erase device %s? (y/n)", device.Properties.SerialNumber)
+			golog.Warn("are you sure you want to erase device? (y/n)", "udid", device.Properties.SerialNumber)
 			reader := bufio.NewReader(os.Stdin)
 			// ReadString will block until the delimiter is entered
 			input, err := reader.ReadString('\n')
 			exitIfError("An error occured while reading input", err)
 			if !strings.HasPrefix(input, "y") {
-				log.Errorf("abort")
+				golog.Error("abort")
 				return
 			}
 		}
@@ -624,21 +650,21 @@ The commands work as following:
 			cert, err := ios.CreateDERFormattedSupervisionCert()
 			exitIfError("failed creating cert", err)
 			err = os.WriteFile("supervision-cert.der", cert.CertDER, 0o777)
-			log.Info("supervision-cert.der")
+			golog.Info("supervision-cert.der")
 			exitIfError("failed writing cert", err)
 			err = os.WriteFile("supervision-cert.pem", cert.CertPEM, 0o777)
-			log.Info("supervision-cert.pem")
+			golog.Info("supervision-cert.pem")
 			exitIfError("failed writing cert", err)
 			err = os.WriteFile("supervision-private-key.key", cert.PrivateKeyDER, 0o777)
-			log.Info("supervision-private-key.key")
+			golog.Info("supervision-private-key.key")
 			exitIfError("failed writing cert", err)
 			err = os.WriteFile("supervision-private-key.pem", cert.PrivateKeyPEM, 0o777)
-			log.Info("supervision-private-key.pem")
+			golog.Info("supervision-private-key.pem")
 			exitIfError("failed writing key", err)
 			err = os.WriteFile("supervision-csr.csr", []byte(cert.Csr), 0o777)
-			log.Info("supervision-csr.csr")
+			golog.Info("supervision-csr.csr")
 			exitIfError("failed writing cert", err)
-			log.Info("Golang does not have good PKCS12 format sadly. If you need a p12 file run this: " +
+			golog.Info("Golang does not have good PKCS12 format sadly. If you need a p12 file run this: " +
 				"'openssl pkcs12 -export -inkey supervision-private-key.pem -in supervision-cert.pem -out certificate.p12 -password pass:a'")
 			return
 		}
@@ -676,7 +702,7 @@ The commands work as following:
 			rawCertBytes, err := os.ReadFile(certfile)
 			exitIfError("failed opening cert file", err)
 			if orgname == "" {
-				log.Fatal("--orgname must be specified if certfile for supervision is provided")
+				golog.Fatal("--orgname must be specified if certfile for supervision is provided")
 			}
 			certBytes, err = extractDERCertificate(rawCertBytes, p12password)
 			exitIfError("failed to parse supervision certificate", err)
@@ -789,7 +815,7 @@ The commands work as following:
 	if b {
 		locale, _ := arguments.String("--setlocale")
 		newlang, _ := arguments.String("--setlang")
-		log.Debugf("lang --setlocale:%s --setlang:%s", locale, newlang)
+		golog.Debug("lang", "setlocale", locale, "setlang", newlang)
 		language(device, locale, newlang)
 		return
 	}
@@ -859,8 +885,9 @@ The commands work as following:
 
 	b, _ = arguments.Bool("dproxy")
 	if b {
-		log.SetFormatter(&log.TextFormatter{})
-		// log.SetLevel(log.DebugLevel)
+		// NOTE: previously this forced a logrus TextFormatter for the dproxy
+		// path. Log formatting is now decided centrally from --nojson during
+		// logger setup, so this per-path override is dropped.
 		binaryMode, _ := arguments.Bool("--binary")
 		startDebugProxy(device, binaryMode)
 		return
@@ -1077,7 +1104,7 @@ The commands work as following:
 		if removeCommand {
 			mcinstall.RemoveProxy(device)
 			exitIfError("failed removing proxy", err)
-			log.Info("success")
+			golog.Info("success")
 			return
 		}
 		host, _ := arguments.String("<host>")
@@ -1097,7 +1124,7 @@ The commands work as following:
 
 		err = mcinstall.SetHttpProxy(device, host, port, user, pass, p12bytes, p12password)
 		exitIfError("failed", err)
-		log.Info("success")
+		golog.Info("success")
 		return
 	}
 
@@ -1150,7 +1177,7 @@ The commands work as following:
 		bKillExisting, _ := arguments.Bool("--kill-existing")
 		bundleID, _ := arguments.String("<bundleID>")
 		if bundleID == "" {
-			log.Fatal("please provide a bundleID")
+			golog.Fatal("please provide a bundleID")
 		}
 		pControl, err := instruments.NewProcessControl(device)
 		exitIfError("processcontrol failed", err)
@@ -1162,12 +1189,12 @@ The commands work as following:
 		envs := toEnvs(arguments["--env"].([]string))
 		pid, err := pControl.LaunchAppWithArgs(bundleID, args, envs, opts)
 		exitIfError("launch app command failed", err)
-		log.WithFields(log.Fields{"pid": pid}).Info("Process launched")
+		golog.Info("Process launched", "pid", pid)
 		if wait {
 			c := make(chan os.Signal, 1)
 			signal.Notify(c, syscall.SIGINT, syscall.SIGTERM)
 			<-c
-			log.WithFields(log.Fields{"pid": pid}).Info("stop listening to logs")
+			golog.Info("stop listening to logs", "pid", pid)
 		}
 	}
 
@@ -1193,7 +1220,7 @@ The commands work as following:
 		if process.Pid > 1 {
 			disabled, err := pControl.DisableMemoryLimit(process.Pid)
 			exitIfError("DisableMemoryLimit failed", err)
-			log.WithFields(log.Fields{"process": process.Name, "pid": process.Pid}).Info("memory limit is off: ", disabled)
+			golog.Info("memory limit is off", "process", process.Name, "pid", process.Pid, "disabled", disabled)
 		}
 	}
 
@@ -1208,7 +1235,7 @@ The commands work as following:
 
 		// Technically "Mach Kernel" is process 0, I suppose we provide no way to attempt to kill that.
 		if bundleID == "" && processID == 0 && processName == "" {
-			log.Fatal("please provide a bundleID")
+			golog.Fatal("please provide a bundleID")
 		}
 		pControl, err := instruments.NewProcessControl(device)
 		exitIfError("processcontrol failed", err)
@@ -1226,7 +1253,7 @@ The commands work as following:
 				}
 			}
 			if processName == "" {
-				log.Errorf("%s not installed", bundleID)
+				golog.Error("not installed", "bundleID", bundleID)
 				os.Exit(1)
 				return
 			}
@@ -1242,19 +1269,19 @@ The commands work as following:
 				err = pControl.KillProcess(p.Pid)
 				exitIfError("kill process failed ", err)
 				if bundleID != "" {
-					log.WithFields(log.Fields{"pid": p.Pid}).Info(bundleID, " killed, Pid: ", p.Pid)
+					golog.Info("killed", "bundleID", bundleID, "pid", p.Pid)
 				} else {
-					log.WithFields(log.Fields{"pid": p.Pid}).Info(p.Name, " killed, Pid: ", p.Pid)
+					golog.Info("killed", "process", p.Name, "pid", p.Pid)
 				}
 				return
 			}
 		}
 		if bundleID != "" {
-			log.Error("process of ", bundleID, " not found")
+			golog.Error("process not found", "bundleID", bundleID)
 		} else if processName != "" {
-			log.Error("process named ", processName, " not found")
+			golog.Error("process not found", "process", processName)
 		} else {
-			log.Error("process with pid ", processID, " not found")
+			golog.Error("process not found", "pid", processID)
 		}
 		os.Exit(1)
 		return
@@ -1307,15 +1334,15 @@ The commands work as following:
 
 			testResults, err := testmanagerd.RunTestWithConfig(context.TODO(), config)
 			if err != nil {
-				log.WithFields(log.Fields{"error": err}).Info("Failed running Xcuitest")
+				golog.Info("Failed running Xcuitest", "error", err)
 			}
 
-			log.Info(fmt.Printf("%+v", testResults))
+			golog.Info("test results", "results", testResults)
 		} else {
 			config.Listener = testmanagerd.NewTestListener(io.Discard, io.Discard, os.TempDir())
 			_, err := testmanagerd.RunTestWithConfig(context.TODO(), config)
 			if err != nil {
-				log.WithFields(log.Fields{"error": err}).Info("Failed running Xcuitest")
+				golog.Info("Failed running Xcuitest", "error", err)
 			}
 		}
 		return
@@ -1339,15 +1366,15 @@ The commands work as following:
 
 			testResults, err := testmanagerd.StartXCTestWithConfig(context.TODO(), xctestrunFilePath, device, listener)
 			if err != nil {
-				log.WithFields(log.Fields{"error": err}).Info("Failed running Xctest")
+				golog.Info("Failed running Xctest", "error", err)
 			}
 
-			log.Info(fmt.Printf("%+v", testResults))
+			golog.Info("test results", "results", testResults)
 		} else {
 			var listener = testmanagerd.NewTestListener(io.Discard, io.Discard, os.TempDir())
 			_, err := testmanagerd.StartXCTestWithConfig(context.TODO(), xctestrunFilePath, device, listener)
 			if err != nil {
-				log.WithFields(log.Fields{"error": err}).Info("Failed running Xctest")
+				golog.Info("Failed running Xctest", "error", err)
 			}
 		}
 		return
@@ -1373,12 +1400,12 @@ The commands work as following:
 	if b {
 		appPath, _ := arguments.String("<app_path>")
 		if appPath == "" {
-			log.Fatal("parameter bundleid and app_path must be specified")
+			golog.Fatal("parameter bundleid and app_path must be specified")
 		}
 		stopAtEntry, _ := arguments.Bool("--stop-at-entry")
 		err = debugserver.Start(device, appPath, stopAtEntry)
 		if err != nil {
-			log.Error(err.Error())
+			golog.Error(err.Error())
 		}
 	}
 
@@ -1391,9 +1418,9 @@ The commands work as following:
 	if b {
 		err := diagnostics.Reboot(device)
 		if err != nil {
-			log.Error(err)
+			golog.Error("reboot failed", "error", err)
 		} else {
-			log.Info("ok")
+			golog.Info("ok")
 		}
 		return
 	}
@@ -1456,7 +1483,7 @@ The commands work as following:
 		exitIfError("file: failed to connect to file service", err)
 		defer func() {
 			if closeErr := conn.Close(); closeErr != nil {
-				log.Errorf("Failed to close file service connection: %v", closeErr)
+				golog.Error("Failed to close file service connection", "error", closeErr)
 			}
 		}()
 
@@ -1506,7 +1533,7 @@ The commands work as following:
 			defer outputFile.Close()
 
 			// Download file using streaming to minimize memory usage
-			log.Infof("Downloading %s to %s...", remotePath, localPath)
+			golog.Info("downloading", "remote", remotePath, "local", localPath)
 			err = conn.PullFile(remotePath, outputFile)
 			exitIfError("file pull: failed to download file", err)
 
@@ -1523,7 +1550,7 @@ The commands work as following:
 				}
 				fmt.Println(convertToJSONString(result))
 			} else {
-				log.Infof("Downloaded %d bytes to %s", fileSize, localPath)
+				golog.Info("downloaded", "bytes", fileSize, "local", localPath)
 			}
 		}
 
@@ -1552,7 +1579,7 @@ The commands work as following:
 			defer file.Close()
 
 			// Upload file using streaming to minimize memory usage
-			log.Infof("Uploading %s to %s...", localPath, remotePath)
+			golog.Info("uploading", "local", localPath, "remote", remotePath)
 			err = conn.PushFile(remotePath, file, fileSize, permissions, uid, gid)
 			exitIfError("push: failed to upload file", err)
 
@@ -1564,7 +1591,7 @@ The commands work as following:
 				}
 				fmt.Println(convertToJSONString(result))
 			} else {
-				log.Infof("Uploaded %d bytes to %s", fileSize, remotePath)
+				golog.Info("uploaded", "bytes", fileSize, "remote", remotePath)
 			}
 		}
 
@@ -1679,7 +1706,7 @@ The commands work as following:
 			exitIfError("If --userspace is not set, we need sudo, an admin shell on Windows, or CAP_NET_ADMIN on Linux", err)
 		}
 		if useUserspaceNetworking {
-			log.Info("Using userspace networking")
+			golog.Info("Using userspace networking")
 		}
 		stopagent, _ := arguments.Bool("stopagent")
 		listCommand, _ := arguments.Bool("ls")
@@ -1743,7 +1770,7 @@ The commands work as following:
 			defer conn.Close()
 			err = conn.RevealDevMode()
 			exitIfError("Failed revealing developer mode menu", err)
-			log.Info("Developer Mode menu has been revealed on the device. Go to Settings → Privacy & Security → Developer Mode to enable it.")
+			golog.Info("Developer Mode menu has been revealed on the device. Go to Settings → Privacy & Security → Developer Mode to enable it.")
 		}
 
 		return
@@ -1763,24 +1790,24 @@ func printSysmontapStats(device ios.DeviceEntry) {
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
 
-	log.Info("starting to monitor CPU usage... Press CTRL+C to stop.")
+	golog.Info("starting to monitor CPU usage... Press CTRL+C to stop.")
 
 	for {
 		select {
 		case cpuUsageMsg, ok := <-cpuUsageChannel:
 			if !ok {
-				log.Info("CPU usage channel closed.")
+				golog.Info("CPU usage channel closed.")
 				return
 			}
-			log.WithFields(log.Fields{
-				"cpu_count":      cpuUsageMsg.CPUCount,
-				"enabled_cpus":   cpuUsageMsg.EnabledCPUs,
-				"end_time":       cpuUsageMsg.EndMachAbsTime,
-				"cpu_total_load": cpuUsageMsg.SystemCPUUsage.CPU_TotalLoad,
-			}).Info("received CPU usage data")
+			golog.Info("received CPU usage data",
+				"cpu_count", cpuUsageMsg.CPUCount,
+				"enabled_cpus", cpuUsageMsg.EnabledCPUs,
+				"end_time", cpuUsageMsg.EndMachAbsTime,
+				"cpu_total_load", cpuUsageMsg.SystemCPUUsage.CPU_TotalLoad,
+			)
 
 		case <-c:
-			log.Info("shutting down sysmontap")
+			golog.Info("shutting down sysmontap")
 			return
 		}
 	}
@@ -1824,34 +1851,31 @@ func imageCommand1(device ios.DeviceEntry, arguments docopt.Opts) bool {
 			var err error
 			path, err = imagemounter.DownloadImageFor(device, basedir)
 			if err != nil {
-				log.WithFields(log.Fields{"basedir": basedir, "udid": device.Properties.SerialNumber, "err": err}).
-					Error("failed downloading image")
+				golog.Error("failed downloading image", "basedir", basedir, "udid", device.Properties.SerialNumber, "err", err)
 				return false
 			}
 
-			log.WithFields(log.Fields{"basedir": basedir, "udid": device.Properties.SerialNumber}).Info("success downloaded image")
+			golog.Info("success downloaded image", "basedir", basedir, "udid", device.Properties.SerialNumber)
 		}
 
 		mount, _ := arguments.Bool("mount")
 		if mount || auto {
 			err := imagemounter.MountImage(device, path)
 			if err != nil {
-				log.WithFields(log.Fields{"image": path, "udid": device.Properties.SerialNumber, "err": err}).
-					Error("error mounting image")
+				golog.Error("error mounting image", "image", path, "udid", device.Properties.SerialNumber, "err", err)
 				return true
 			}
-			log.WithFields(log.Fields{"image": path, "udid": device.Properties.SerialNumber}).Info("success mounting image")
+			golog.Info("success mounting image", "image", path, "udid", device.Properties.SerialNumber)
 		}
 
 		unmount, _ := arguments.Bool("unmount")
 		if unmount {
 			err := imagemounter.UnmountImage(device)
 			if err != nil {
-				log.WithFields(log.Fields{"udid": device.Properties.SerialNumber, "err": err}).
-					Error("error unmounting image")
+				golog.Error("error unmounting image", "udid", device.Properties.SerialNumber, "err", err)
 				return true
 			}
-			log.WithFields(log.Fields{"udid": device.Properties.SerialNumber}).Info("success unmounting image")
+			golog.Info("success unmounting image", "udid", device.Properties.SerialNumber)
 		}
 	}
 	return b
@@ -1867,14 +1891,14 @@ func runWdaCommand(device ios.DeviceEntry, arguments docopt.Opts) bool {
 		wdaenv := splitKeyValuePairs(arguments["--env"].([]string), "=")
 
 		if bundleID == "" && testbundleID == "" && xctestconfig == "" {
-			log.Info("no bundle ids specified, falling back to defaults")
+			golog.Info("no bundle ids specified, falling back to defaults")
 			bundleID, testbundleID, xctestconfig = "com.facebook.WebDriverAgentRunner.xctrunner", "com.facebook.WebDriverAgentRunner.xctrunner", "WebDriverAgentRunner.xctest"
 		}
 		if bundleID == "" || testbundleID == "" || xctestconfig == "" {
-			log.WithFields(log.Fields{"bundleid": bundleID, "testbundleid": testbundleID, "xctestconfig": xctestconfig}).Error("please specify either NONE of bundleid, testbundleid and xctestconfig or ALL of them. At least one was empty.")
+			golog.Error("please specify either NONE of bundleid, testbundleid and xctestconfig or ALL of them. At least one was empty.", "bundleid", bundleID, "testbundleid", testbundleID, "xctestconfig", xctestconfig)
 			return true
 		}
-		log.WithFields(log.Fields{"bundleid": bundleID, "testbundleid": testbundleID, "xctestconfig": xctestconfig}).Info("Running wda")
+		golog.Info("Running wda", "bundleid", bundleID, "testbundleid", testbundleID, "xctestconfig", xctestconfig)
 
 		rawTestlog, rawTestlogErr := arguments.String("--log-output")
 
@@ -1916,17 +1940,17 @@ func runWdaCommand(device ios.DeviceEntry, arguments docopt.Opts) bool {
 
 		select {
 		case err := <-errorChannel:
-			log.WithError(err).Error("Failed running WDA")
+			golog.Error("Failed running WDA", "error", err)
 			stopWda()
 			os.Exit(1)
 		case <-ctx.Done():
-			log.Error("WDA process ended unexpectedly")
+			golog.Error("WDA process ended unexpectedly")
 			os.Exit(1)
 		case signal := <-c:
-			log.Infof("os signal:%d received, closing...", signal)
+			golog.Info("os signal received, closing...", "signal", signal)
 			stopWda()
 		}
-		log.Info("Done Closing")
+		golog.Info("Done Closing")
 	}
 	return b
 }
@@ -1936,13 +1960,13 @@ func instrumentsCommand(device ios.DeviceEntry, arguments docopt.Opts) bool {
 	if b {
 		listenerFunc, closeFunc, err := instruments.ListenAppStateNotifications(device)
 		if err != nil {
-			log.Fatal(err)
+			golog.Fatal("failed listening to app state notifications", "error", err)
 		}
 		go func() {
 			for {
 				notification, err := listenerFunc()
 				if err != nil {
-					log.Error(err)
+					golog.Error("listener error", "error", err)
 					return
 				}
 				s, _ := json.Marshal(notification)
@@ -1954,7 +1978,7 @@ func instrumentsCommand(device ios.DeviceEntry, arguments docopt.Opts) bool {
 		<-c
 		err = closeFunc()
 		if err != nil {
-			log.Warnf("timeout during close %v", err)
+			golog.Warn("timeout during close", "error", err)
 		}
 	}
 	return b
@@ -2002,7 +2026,7 @@ func crashCommand(device ios.DeviceEntry, arguments docopt.Opts) bool {
 		if cp {
 			pattern, _ := arguments.String("<srcpattern>")
 			target, _ := arguments.String("<target>")
-			log.Debugf("cp %s %s", pattern, target)
+			golog.Debug("cp", "srcpattern", pattern, "target", target)
 			err := crashreport.DownloadReports(device, pattern, target)
 			exitIfError("failed downloading crashreports", err)
 		}
@@ -2011,7 +2035,7 @@ func crashCommand(device ios.DeviceEntry, arguments docopt.Opts) bool {
 		if rm {
 			cwd, _ := arguments.String("<cwd>")
 			pattern, _ := arguments.String("<pattern>")
-			log.Debugf("rm %s %s", cwd, pattern)
+			golog.Debug("rm", "cwd", cwd, "pattern", pattern)
 			err := crashreport.RemoveReports(device, cwd, pattern)
 			exitIfError("failed deleting crashreports", err)
 		}
@@ -2037,17 +2061,17 @@ func deviceState(device ios.DeviceEntry, list bool, enable bool, profileTypeId s
 	if enable {
 		pType, profile, err := instruments.VerifyProfileAndType(profileTypes, profileTypeId, profileId)
 		exitIfError("invalid arguments", err)
-		log.Info("Enabling profile.. (this can take a while for ThermalConditions)")
+		golog.Info("Enabling profile.. (this can take a while for ThermalConditions)")
 		err = control.Enable(pType, profile)
 		exitIfError("could not enable profile", err)
-		log.Infof("Profile %s - %s is active! waiting for SIGTERM..", profileTypeId, profileId)
+		golog.Info("profile is active! waiting for SIGTERM..", "profileType", profileTypeId, "profile", profileId)
 		c := make(chan os.Signal, syscall.SIGTERM)
 		signal.Notify(c, os.Interrupt)
 		<-c
-		log.Infof("Disabling profiletype %s", profileTypeId)
+		golog.Info("disabling profiletype", "profileType", profileTypeId)
 		err = control.Disable(pType)
 		exitIfError("could not disable profile", err)
-		log.Info("ok")
+		golog.Info("ok")
 	}
 }
 
@@ -2076,17 +2100,16 @@ func listMountedImages(device ios.DeviceEntry) {
 	signatures, err := conn.ListImages()
 	exitIfError("failed getting image list", err)
 	if len(signatures) == 0 {
-		log.Infof("none")
+		golog.Info("none")
 		return
 	}
 	for _, sig := range signatures {
-		log.Infof("%x", sig)
+		golog.Info("image signature", "signature", fmt.Sprintf("%x", sig))
 	}
 }
 
 func installApp(device ios.DeviceEntry, path string) {
-	log.WithFields(
-		log.Fields{"appPath": path, "device": device.Properties.SerialNumber}).Info("installing")
+	golog.Info("installing", "appPath", path, "device", device.Properties.SerialNumber)
 	conn, err := zipconduit.New(device)
 	exitIfError("failed connecting to zipconduit, dev image installed?", err)
 	err = conn.SendFile(path)
@@ -2094,8 +2117,7 @@ func installApp(device ios.DeviceEntry, path string) {
 }
 
 func uninstallApp(device ios.DeviceEntry, bundleId string) {
-	log.WithFields(
-		log.Fields{"appPath": bundleId, "device": device.Properties.SerialNumber}).Info("uninstalling")
+	golog.Info("uninstalling", "appPath", bundleId, "device", device.Properties.SerialNumber)
 	svc, err := installationproxy.New(device)
 	exitIfError("failed connecting to installationproxy", err)
 	err = svc.Uninstall(bundleId)
@@ -2109,7 +2131,7 @@ func language(device ios.DeviceEntry, locale string, language string) {
 	err = ios.SetLanguage(device, ios.LanguageConfiguration{Language: language, Locale: locale})
 	exitIfError("failed setting language", err)
 	if lang.Language != language && language != "" {
-		log.Debugf("Language should be changed from %s to %s waiting for Springboard to reboot", lang.Language, language)
+		golog.Debug("Language should be changed waiting for Springboard to reboot", "from", lang.Language, "to", language)
 		notificationproxy.WaitUntilSpringboardStarted(device)
 	}
 	lang, err = ios.GetLanguage(device)
@@ -2126,7 +2148,7 @@ func assistiveTouch(device ios.DeviceEntry, operation string, force bool) {
 		exitIfError("failed getting device product version", err)
 
 		if version.LessThan(ios.IOS11()) {
-			log.Errorf("iOS Version 11.0+ required to manipulate AssistiveTouch.  iOS version: %s detected. Use --force to override.", version)
+			golog.Error("iOS Version 11.0+ required to manipulate AssistiveTouch. Use --force to override.", "version", version)
 			os.Exit(1)
 		}
 	}
@@ -2134,7 +2156,7 @@ func assistiveTouch(device ios.DeviceEntry, operation string, force bool) {
 	wasEnabled, err := ios.GetAssistiveTouch(device)
 	if err != nil {
 		if force && (operation == "enable" || operation == "disable") {
-			log.WithFields(log.Fields{"error": err}).Warn("Failed getting current AssistiveTouch status. Continuing anyway.")
+			golog.Warn("Failed getting current AssistiveTouch status. Continuing anyway.", "error", err)
 		} else {
 			exitIfError("failed getting current AssistiveTouch status", err)
 		}
@@ -2171,7 +2193,7 @@ func voiceOver(device ios.DeviceEntry, operation string, force bool) {
 		exitIfError("failed getting device product version", err)
 
 		if version.LessThan(ios.IOS11()) {
-			log.Errorf("iOS Version 11.0+ required to manipulate VoiceOver.  iOS version: %s detected. Use --force to override.", version)
+			golog.Error("iOS Version 11.0+ required to manipulate VoiceOver. Use --force to override.", "version", version)
 			os.Exit(1)
 		}
 	}
@@ -2180,7 +2202,7 @@ func voiceOver(device ios.DeviceEntry, operation string, force bool) {
 
 	if err != nil {
 		if force && (operation == "enable" || operation == "disable") {
-			log.WithFields(log.Fields{"error": err}).Warn("Failed getting current VoiceOver status. Continuing anyway.")
+			golog.Warn("Failed getting current VoiceOver status. Continuing anyway.", "error", err)
 		} else {
 			exitIfError("failed getting current VoiceOver status", err)
 		}
@@ -2217,7 +2239,7 @@ func zoomTouch(device ios.DeviceEntry, operation string, force bool) {
 		exitIfError("failed getting device product version", err)
 
 		if version.LessThan(ios.IOS11()) {
-			log.Errorf("iOS Version 11.0+ required to manipulate VoiceOver.  iOS version: %s detected. Use --force to override.", version)
+			golog.Error("iOS Version 11.0+ required to manipulate ZoomTouch. Use --force to override.", "version", version)
 			os.Exit(1)
 		}
 	}
@@ -2226,7 +2248,7 @@ func zoomTouch(device ios.DeviceEntry, operation string, force bool) {
 
 	if err != nil {
 		if force && (operation == "enable" || operation == "disable") {
-			log.WithFields(log.Fields{"error": err}).Warn("Failed getting current VoiceOver status. Continuing anyway.")
+			golog.Warn("Failed getting current ZoomTouch status. Continuing anyway.", "error", err)
 		} else {
 			exitIfError("failed getting current VoiceOver status", err)
 		}
@@ -2263,7 +2285,7 @@ func timeFormat(device ios.DeviceEntry, operation string, force bool) {
 		exitIfError("failed getting device product version", err)
 
 		if version.LessThan(ios.IOS11()) {
-			log.Errorf("iOS Version 11.0+ required to manipulate Time Format.  iOS version: %s detected. Use --force to override.", version)
+			golog.Error("iOS Version 11.0+ required to manipulate Time Format. Use --force to override.", "version", version)
 			os.Exit(1)
 		}
 	}
@@ -2272,7 +2294,7 @@ func timeFormat(device ios.DeviceEntry, operation string, force bool) {
 
 	if err != nil {
 		if force && (operation == "24h" || operation == "12h") {
-			log.WithFields(log.Fields{"error": err}).Warn("Failed getting current TimeFormat value. Continuing anyway.")
+			golog.Warn("Failed getting current TimeFormat value. Continuing anyway.", "error", err)
 		} else {
 			exitIfError("failed getting current TimeFormat value", err)
 		}
@@ -2361,7 +2383,7 @@ func startDebugProxy(device ios.DeviceEntry, binaryMode bool) {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				log.Errorf("Recovered a panic: %v", r)
+				golog.Error("Recovered a panic", "panic", r)
 				proxy.Close()
 				debug.PrintStack()
 				os.Exit(1)
@@ -2369,13 +2391,13 @@ func startDebugProxy(device ios.DeviceEntry, binaryMode bool) {
 			}
 		}()
 		err := proxy.Launch(device, binaryMode)
-		log.WithFields(log.Fields{"error": err}).Infof("DebugProxy Terminated abnormally")
+		golog.Info("DebugProxy Terminated abnormally", "error", err)
 		os.Exit(0)
 	}()
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
 	<-c
-	log.Info("Shutting down debugproxy")
+	golog.Info("Shutting down debugproxy")
 	proxy.Close()
 }
 
@@ -2384,7 +2406,7 @@ func handleProfileRemove(device ios.DeviceEntry, identifier string) {
 	exitIfError("Starting mcInstall failed with", err)
 	err = profileService.RemoveProfile(identifier)
 	exitIfError("failed adding profile", err)
-	log.Infof("profile '%s' removed", identifier)
+	golog.Info("profile removed", "identifier", identifier)
 }
 
 func handleProfileAdd(device ios.DeviceEntry, file string) {
@@ -2394,7 +2416,7 @@ func handleProfileAdd(device ios.DeviceEntry, file string) {
 	exitIfError("could not read profile-file", err)
 	err = profileService.AddProfile(filebytes)
 	exitIfError("failed adding profile", err)
-	log.Info("profile installed, you have to accept it in the device settings")
+	golog.Info("profile installed, you have to accept it in the device settings")
 }
 
 func handleProfileAddSupervised(device ios.DeviceEntry, file string, p12file string, p12password string) {
@@ -2406,7 +2428,7 @@ func handleProfileAddSupervised(device ios.DeviceEntry, file string, p12file str
 	exitIfError("could not read p12-file", err)
 	err = profileService.AddProfileSupervised(filebytes, p12bytes, p12password)
 	exitIfError("failed adding profile", err)
-	log.Info("profile installed")
+	golog.Info("profile installed")
 }
 
 func handleProfileList(device ios.DeviceEntry) {
@@ -2419,7 +2441,7 @@ func handleProfileList(device ios.DeviceEntry) {
 
 func handleSetWallpaper(device ios.DeviceEntry, imagePath, screen, p12file, p12password string) {
 	if p12file == "" {
-		log.Fatal("--p12file is required (set-wallpaper needs a supervisor identity)")
+		golog.Fatal("--p12file is required (set-wallpaper needs a supervisor identity)")
 	}
 	screenValue, err := mcinstall.ParseWallpaperScreen(screen)
 	exitIfError("invalid --screen", err)
@@ -2527,10 +2549,10 @@ func startMultiForwarding(device ios.DeviceEntry, mappings []string) {
 			exitIfError(fmt.Sprintf("failed to forward %d:%d", hostPort, targetPort), err)
 		}
 		listeners = append(listeners, cl)
-		log.Infof("Forwarding %d -> %d", hostPort, targetPort)
+		golog.Info("forwarding", "hostPort", hostPort, "targetPort", targetPort)
 	}
 
-	log.Infof("Started %d port forwards", len(listeners))
+	golog.Info("started port forwards", "count", len(listeners))
 
 	// Wait for interrupt
 	c := make(chan os.Signal, 1)
@@ -2542,7 +2564,7 @@ func startMultiForwarding(device ios.DeviceEntry, mappings []string) {
 }
 
 func printDiagnostics(device ios.DeviceEntry) {
-	log.Debug("print diagnostics")
+	golog.Debug("print diagnostics")
 	diagnosticsService, err := diagnostics.New(device)
 	exitIfError("Starting diagnostics service failed with", err)
 
@@ -2621,7 +2643,7 @@ func printInstalledApps(device ios.DeviceEntry, system bool, all bool, list bool
 		return
 	}
 	if JSONdisabled {
-		log.Info(response)
+		golog.Info("apps", "apps", response)
 	} else {
 		fmt.Println(convertToJSONString(response))
 	}
@@ -2659,7 +2681,7 @@ func saveScreenshot(device ios.DeviceEntry, outputPath string) {
 	if JSONdisabled {
 		fmt.Println(outputPath)
 	} else {
-		log.WithFields(log.Fields{"outputPath": outputPath}).Info("File saved successfully")
+		golog.Info("File saved successfully", "outputPath", outputPath)
 	}
 }
 
@@ -2784,7 +2806,7 @@ func outputProcessListNoJSON(device ios.DeviceEntry, processes []instruments.Pro
 	appInfoByExecutableName := make(map[string]installationproxy.AppInfo)
 
 	if err != nil {
-		log.Error("browsing installed apps failed. bundleID will not be included in output")
+		golog.Error("browsing installed apps failed. bundleID will not be included in output")
 	} else {
 		for _, app := range response {
 			appInfoByExecutableName[app.CFBundleExecutable()] = app
@@ -2821,7 +2843,7 @@ func startListening() {
 			deviceConn, err := ios.NewDeviceConnection(ios.GetUsbmuxdSocket())
 			defer deviceConn.Close()
 			if err != nil {
-				log.Errorf("could not connect to %s with err %+v, will retry in 3 seconds...", ios.GetUsbmuxdSocket(), err)
+				golog.Error("could not connect, will retry in 3 seconds...", "socket", ios.GetUsbmuxdSocket(), "error", err)
 				time.Sleep(time.Second * 3)
 				continue
 			}
@@ -2829,7 +2851,7 @@ func startListening() {
 
 			attachedReceiver, err := muxConnection.Listen()
 			if err != nil {
-				log.Error("Failed issuing Listen command, will retry in 3 seconds", err)
+				golog.Error("Failed issuing Listen command, will retry in 3 seconds", "error", err)
 				deviceConn.Close()
 				time.Sleep(time.Second * 3)
 				continue
@@ -2837,7 +2859,7 @@ func startListening() {
 			for {
 				msg, err := attachedReceiver()
 				if err != nil {
-					log.Error("Stopped listening because of error")
+					golog.Error("Stopped listening because of error")
 					break
 				}
 				fmt.Println(convertToJSONString((msg)))
@@ -2856,18 +2878,18 @@ func printDeviceInfo(device ios.DeviceEntry) {
 	}
 	svc, err := instruments.NewDeviceInfoService(device)
 	if err != nil {
-		log.Debugf("could not open instruments, probably dev image not mounted %v", err)
+		golog.Debug("could not open instruments, probably dev image not mounted", "error", err)
 	}
 	if err == nil {
 		info, err := svc.NetworkInformation()
 		if err != nil {
-			log.Debugf("error getting networkinfo from instruments %v", err)
+			golog.Debug("error getting networkinfo from instruments", "error", err)
 		} else {
 			allValues["instruments:networkInformation"] = info
 		}
 		info, err = svc.HardwareInformation()
 		if err != nil {
-			log.Debugf("error getting hardwareinfo from instruments %v", err)
+			golog.Debug("error getting hardwareinfo from instruments", "error", err)
 		} else {
 			allValues["instruments:hardwareInformation"] = info
 		}
@@ -2877,7 +2899,7 @@ func printDeviceInfo(device ios.DeviceEntry) {
 }
 
 func runSyslog(device ios.DeviceEntry, parse bool) {
-	log.Debug("Run Syslog.")
+	golog.Debug("Run Syslog.")
 
 	syslogConnection, err := syslog.New(device)
 	exitIfError("Syslog connection failed", err)
@@ -2911,7 +2933,7 @@ func runSyslog(device ios.DeviceEntry, parse bool) {
 }
 
 func runOsTrace(device ios.DeviceEntry, pid int, processName string, messageFilter uint16, streamFlags uint32, clientFilter ostrace.ClientFilter, follow bool) {
-	log.Debug("Run OsTrace.")
+	golog.Debug("Run OsTrace.")
 	// Note: streaming log messages places significant CPU load on the device.
 
 	formatEntry := func(e ostrace.LogEntry) string {
@@ -2949,7 +2971,7 @@ func runOsTrace(device ios.DeviceEntry, pid int, processName string, messageFilt
 				service, err := instruments.NewDeviceInfoService(device)
 				if err != nil {
 					if follow {
-						log.Warnf("Failed to open deviceInfoService: %v, retrying...", err)
+						golog.Warn("Failed to open deviceInfoService, retrying...", "error", err)
 						if sleepOrCancel(2 * time.Second) {
 							return
 						}
@@ -2962,7 +2984,7 @@ func runOsTrace(device ios.DeviceEntry, pid int, processName string, messageFilt
 				if err != nil {
 					if follow {
 						if !waitingLogged {
-							log.Infof("Waiting for process %q to appear...", processName)
+							golog.Info("Waiting for process to appear...", "process", processName)
 							waitingLogged = true
 						}
 						if sleepOrCancel(2 * time.Second) {
@@ -2973,7 +2995,7 @@ func runOsTrace(device ios.DeviceEntry, pid int, processName string, messageFilt
 					exitIfError("process not found", err)
 				}
 				pid = int(proc.Pid)
-				log.Infof("Resolved process %q to PID %d", processName, pid)
+				golog.Info("Resolved process to PID", "process", processName, "pid", pid)
 				resolved = true
 			}
 		}
@@ -2981,7 +3003,7 @@ func runOsTrace(device ios.DeviceEntry, pid int, processName string, messageFilt
 		conn, err := ostrace.New(device, pid, messageFilter, streamFlags)
 		if err != nil {
 			if follow {
-				log.Warnf("os_trace connection failed: %v, retrying...", err)
+				golog.Warn("os_trace connection failed, retrying...", "error", err)
 				if processName != "" {
 					pid = -1
 				}
@@ -3007,7 +3029,7 @@ func runOsTrace(device ios.DeviceEntry, pid int, processName string, messageFilt
 						return
 					case <-ticker.C:
 						if !isProcessAlive(device, uint64(targetPid)) {
-							log.Infof("Process PID %d no longer running", targetPid)
+							golog.Info("Process no longer running", "pid", targetPid)
 							select {
 							case reconnect <- struct{}{}:
 							default:
@@ -3039,17 +3061,17 @@ func runOsTrace(device ios.DeviceEntry, pid int, processName string, messageFilt
 			monitorCancel()
 			conn.Close()
 			if processName != "" {
-				log.Info("os_trace stream ended, reconnecting...")
+				golog.Info("os_trace stream ended, reconnecting...")
 				pid = -1
 			} else {
-				log.Infof("Process PID %d terminated; stopping follow.", pid)
+				golog.Info("Process terminated; stopping follow.", "pid", pid)
 				return
 			}
 		case err := <-done:
 			monitorCancel()
 			conn.Close()
 			if follow {
-				log.Warnf("os_trace stream ended: %v, reconnecting...", err)
+				golog.Warn("os_trace stream ended, reconnecting...", "error", err)
 				if processName != "" {
 					pid = -1
 				}
@@ -3111,13 +3133,13 @@ func formatEntryPlain(entry ostrace.LogEntry) string {
 func isProcessAlive(device ios.DeviceEntry, pid uint64) bool {
 	service, err := instruments.NewDeviceInfoService(device)
 	if err != nil {
-		log.Warnf("isProcessAlive: failed to connect to device: %v", err)
+		golog.Warn("isProcessAlive: failed to connect to device", "error", err)
 		return false
 	}
 	defer service.Close()
 	procs, err := service.ProcessList()
 	if err != nil {
-		log.Warnf("isProcessAlive: failed to list processes: %v", err)
+		golog.Warn("isProcessAlive: failed to list processes", "error", err)
 		return false
 	}
 	for _, p := range procs {
@@ -3158,14 +3180,14 @@ func pairDevice(device ios.DeviceEntry, orgIdentityP12File string, p12Password s
 	if orgIdentityP12File == "" {
 		err := ios.Pair(device)
 		exitIfError("Pairing failed", err)
-		log.Infof("Successfully paired %s", device.Properties.SerialNumber)
+		golog.Info("Successfully paired", "udid", device.Properties.SerialNumber)
 		return
 	}
 	p12, err := os.ReadFile(orgIdentityP12File)
 	exitIfError("Invalid file:"+orgIdentityP12File, err)
 	err = ios.PairSupervised(device, p12, p12Password)
 	exitIfError("Pairing failed", err)
-	log.Infof("Successfully paired %s", device.Properties.SerialNumber)
+	golog.Info("Successfully paired", "udid", device.Properties.SerialNumber)
 }
 
 func startTunnel(ctx context.Context, recordsPath string, tunnelInfoPort int, userspaceTUN bool) {
@@ -3183,7 +3205,7 @@ func startTunnel(ctx context.Context, recordsPath string, tunnelInfoPort int, us
 			case <-ticker.C:
 				err := tm.UpdateTunnels(ctx)
 				if err != nil {
-					log.WithError(err).Warn("failed to update tunnels")
+					golog.Warn("failed to update tunnels", "error", err)
 				}
 			}
 		}
@@ -3195,7 +3217,7 @@ func startTunnel(ctx context.Context, recordsPath string, tunnelInfoPort int, us
 			exitIfError("failed to start tunnel server", err)
 		}
 	}()
-	log.Info("Tunnel server started")
+	golog.Info("Tunnel server started")
 	<-ctx.Done()
 }
 
@@ -3244,7 +3266,7 @@ func convertToJSONString(data interface{}) string {
 
 func exitIfError(msg string, err error) {
 	if err != nil {
-		log.WithFields(log.Fields{"err": err}).Fatal(msg)
+		golog.Fatal(msg, "err", err)
 	}
 }
 
@@ -3320,7 +3342,7 @@ func tryParsePKCS12(certBytes []byte, p12Password string) ([]byte, bool) {
 	}
 	_, cert, err := pkcs12.Decode(certBytes, p12Password)
 	if err != nil {
-		log.Debugf("P12 decode failed: %v", err)
+		golog.Debug("P12 decode failed", "error", err)
 		return nil, false
 	}
 	if cert != nil {

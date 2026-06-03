@@ -4,9 +4,8 @@ import (
 	"bytes"
 	"fmt"
 
-	log "github.com/sirupsen/logrus"
-
 	ios "github.com/danielpaulus/go-ios/ios"
+	"github.com/danielpaulus/go-ios/ios/golog"
 	"howett.net/plist"
 )
 
@@ -138,10 +137,10 @@ func checkFinished(dict map[string]interface{}) (bool, error) {
 	}
 	if val, ok := dict["Status"]; ok {
 		if "Complete" == val {
-			log.Info("done uninstalling")
+			golog.Info("done uninstalling")
 			return true, nil
 		}
-		log.Infof("uninstall status: %s", val)
+		golog.Info("uninstall status", "status", val)
 		return false, nil
 	}
 	return true, fmt.Errorf("unknown status update: %+v", dict)
