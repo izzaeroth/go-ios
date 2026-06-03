@@ -500,7 +500,25 @@ The commands work as following:
 	} else {
 		handler = slog.NewJSONHandler(os.Stderr, handlerOpts)
 	}
-	slog.SetDefault(slog.New(handler))
+	logger := slog.New(handler)
+
+	// Wire up logging two ways:
+	//
+	//  1. slog.SetDefault makes this the process-wide default logger. The ios
+	//     CLI's own slog calls (and any third-party library using slog) go here.
+	//
+	//  2. ios.SetLogger explicitly routes go-ios's *library* logging to the same
+	//     logger. go-ios logs through its internal ios/golog seam, which falls
+	//     back to slog.Default() when SetLogger was never called — so for this
+	//     CLI the call below is technically redundant with SetDefault above.
+	//
+	// We still call it on purpose, as the canonical example for embedders: a
+	// program that imports go-ios as a library and wants to send *only*
+	// go-ios's logs to a custom logger (without commandeering its own
+	// slog.Default()) does exactly this — ios.SetLogger(yourLogger). Pass nil
+	// to restore go-ios's default behavior.
+	slog.SetDefault(logger)
+	ios.SetLogger(logger)
 
 	if traceLevelEnabled {
 		slog.Info("Set Trace mode")
