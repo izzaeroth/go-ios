@@ -42,7 +42,7 @@ func (f *dtxDecoder) decode(data []byte) {
 	file, err := os.OpenFile(f.binFilePath+".raw",
 		os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
-		golog.Info("failed opening raw dump file", "error", err)
+		golog.Info("failed opening raw dump file", "module", logModule, "binFilePath", f.binFilePath, "error", err)
 	}
 
 	file.Write(data)
@@ -72,7 +72,7 @@ func (f *dtxDecoder) decode(data []byte) {
 		file, err := os.OpenFile(f.binFilePath,
 			os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 		if err != nil {
-			golog.Info("failed opening bin file", "error", err)
+			golog.Info("failed opening bin file", "module", logModule, "binFilePath", f.binFilePath, "error", err)
 		}
 		s, _ := file.Stat()
 		offset := s.Size()
@@ -82,7 +82,7 @@ func (f *dtxDecoder) decode(data []byte) {
 		file, err = os.OpenFile(f.jsonFilePath,
 			os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 		if err != nil {
-			golog.Info("failed opening json file", "error", err)
+			golog.Info("failed opening json file", "module", logModule, "jsonFilePath", f.jsonFilePath, "error", err)
 		}
 
 		type Alias dtx.Message

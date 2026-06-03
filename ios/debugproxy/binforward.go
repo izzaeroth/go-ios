@@ -112,12 +112,12 @@ func handleConnectToService(connectRequest ios.UsbMuxMessage,
 
 func proxyBinDumpConnection(p *ProxyConnection, binOnUnixSocket BinaryForwardingProxy, binToDevice BinaryForwardingProxy) {
 	defer func() {
-		golog.Info("done") // logged normally even if there is a panic
+		golog.Info("done", "module", logModule, "id", p.id) // logged normally even if there is a panic
 		if x := recover(); x != nil {
-			golog.Info("run time panic, moving back socket", "panic", x)
+			golog.Info("run time panic, moving back socket", "module", logModule, "id", p.id, "panic", x)
 			err := MoveBack(ios.GetUsbmuxdSocket())
 			if err != nil {
-				golog.Error("failed moving back socket", "error", err)
+				golog.Error("failed moving back socket", "module", logModule, "id", p.id, "error", err)
 			}
 			panic(x)
 		}
@@ -126,7 +126,7 @@ func proxyBinDumpConnection(p *ProxyConnection, binOnUnixSocket BinaryForwarding
 	for {
 		bytes, err := binOnUnixSocket.ReadMessage()
 		if err != nil {
-			golog.Error("failed readmessage bin unix sock", "error", err)
+			golog.Error("failed readmessage bin unix sock", "module", logModule, "id", p.id, "error", err)
 		}
 		binOnUnixSocket.decoder.decode(bytes)
 		if err != nil && len(bytes) == 0 {
@@ -142,19 +142,19 @@ func proxyBinDumpConnection(p *ProxyConnection, binOnUnixSocket BinaryForwarding
 
 		err = binToDevice.Send(bytes)
 		if err != nil {
-			golog.Error("failed binforward sending to device", "error", err)
+			golog.Error("failed binforward sending to device", "module", logModule, "id", p.id, "error", err)
 		}
 	}
 }
 
 func proxyBinFromDeviceToHost(p *ProxyConnection, binOnUnixSocket BinaryForwardingProxy, binToDevice BinaryForwardingProxy) {
 	defer func() {
-		golog.Info("done") // logged normally even if there is a panic
+		golog.Info("done", "module", logModule, "id", p.id) // logged normally even if there is a panic
 		if x := recover(); x != nil {
-			golog.Info("run time panic, moving back socket", "panic", x)
+			golog.Info("run time panic, moving back socket", "module", logModule, "id", p.id, "panic", x)
 			err := MoveBack(ios.ToUnixSocketPath(ios.GetUsbmuxdSocket()))
 			if err != nil {
-				golog.Error("failed moving back socket", "error", err)
+				golog.Error("failed moving back socket", "module", logModule, "id", p.id, "error", err)
 			}
 			panic(x)
 		}
@@ -162,7 +162,7 @@ func proxyBinFromDeviceToHost(p *ProxyConnection, binOnUnixSocket BinaryForwardi
 	for {
 		bytes, err := binToDevice.ReadMessage()
 		if err != nil {
-			golog.Error("failed binToDevice.ReadMessage", "error", err, "count", len(bytes))
+			golog.Error("failed binToDevice.ReadMessage", "module", logModule, "id", p.id, "error", err, "count", len(bytes))
 		}
 		binToDevice.decoder.decode(bytes)
 
@@ -179,7 +179,7 @@ func proxyBinFromDeviceToHost(p *ProxyConnection, binOnUnixSocket BinaryForwardi
 		p.log.With("direction", "device2host").Log(context.Background(), golog.LevelTrace, hex.Dump(bytes))
 		err = binOnUnixSocket.Send(bytes)
 		if err != nil {
-			golog.Error("failed binforward sending to host", "error", err)
+			golog.Error("failed binforward sending to host", "module", logModule, "id", p.id, "error", err)
 		}
 	}
 }

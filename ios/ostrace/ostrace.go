@@ -12,6 +12,8 @@ import (
 	"github.com/danielpaulus/go-ios/ios/golog"
 )
 
+const logModule = "go-ios/ostrace"
+
 const (
 	usbmuxdServiceName = "com.apple.os_trace_relay"
 	shimServiceName    = "com.apple.os_trace_relay.shim.remote"
@@ -306,7 +308,7 @@ func (c *Connection) startActivity(pid int, messageFilter uint16, streamFlags ui
 		return fmt.Errorf("ostrace: StartActivity failed, response: %v", response)
 	}
 
-	golog.Debug("ostrace: StartActivity handshake successful")
+	golog.Debug("ostrace: StartActivity handshake successful", "module", logModule, "pid", pid)
 	return nil
 }
 

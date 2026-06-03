@@ -16,6 +16,8 @@ import (
 	"github.com/danielpaulus/go-ios/ios/golog"
 )
 
+const logModule = "go-ios/debugproxy"
+
 const connectionJSONFileName = "connections.json"
 
 // DebugProxy can be used to dump and modify communication between mac and host
@@ -89,7 +91,7 @@ func (d *DebugProxy) Launch(device ios.DeviceEntry, binaryMode bool) error {
 		return fmt.Errorf("dproxy currently does not work when more than one device is connected to the host. please disconnect all but one device.")
 	}
 	if binaryMode {
-		golog.Info("launching proxy in full binary mode")
+		golog.Info("launching proxy in full binary mode", "module", logModule, "udid", device.Properties.SerialNumber)
 	}
 	var pairRecord ios.PairRecord
 	if !binaryMode {
@@ -98,37 +100,37 @@ func (d *DebugProxy) Launch(device ios.DeviceEntry, binaryMode bool) error {
 		if err != nil {
 			return err
 		}
-		golog.Info("successfully retrieved pairrecord", "hostID", pairRecord.HostID, "udid", device.Properties.SerialNumber)
+		golog.Info("successfully retrieved pairrecord", "module", logModule, "udid", device.Properties.SerialNumber, "hostID", pairRecord.HostID)
 	}
 	originalSocket, err := MoveSock(ios.ToUnixSocketPath(ios.GetUsbmuxdSocket()))
 	if err != nil {
-		golog.Error("unable to move, lacking permissions?", "error", err, "socket", ios.GetUsbmuxdSocket())
+		golog.Error("unable to move, lacking permissions?", "module", logModule, "udid", device.Properties.SerialNumber, "error", err, "socket", ios.GetUsbmuxdSocket())
 		return err
 	}
 	d.setupDirectory()
 	listener, err := net.Listen("unix", ios.ToUnixSocketPath(ios.GetUsbmuxdSocket()))
 	if err != nil {
-		golog.Error("could not listen on usbmuxd socket, do I have access permissions?", "error", err)
+		golog.Error("could not listen on usbmuxd socket, do I have access permissions?", "module", logModule, "udid", device.Properties.SerialNumber, "error", err)
 		return err
 	}
 	if err := os.Chmod(ios.ToUnixSocketPath(ios.GetUsbmuxdSocket()), 0o777); err != nil {
-		golog.Error("could not change permission on usbmuxd socket", "error", err)
+		golog.Error("could not change permission on usbmuxd socket", "module", logModule, "udid", device.Properties.SerialNumber, "error", err)
 		return err
 	}
 
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
-			golog.Error("error with connection", "error", err)
+			golog.Error("error with connection", "module", logModule, "udid", device.Properties.SerialNumber, "error", err)
 		}
-		golog.Info("connected")
+		golog.Info("connected", "module", logModule, "udid", device.Properties.SerialNumber)
 		d.connectionCounter++
 		id := fmt.Sprintf("#%d", d.connectionCounter)
 		connectionPath := filepath.Join(".", d.WorkingDir, "connection-"+id+"-"+time.Now().UTC().Format("2006.01.02-15.04.05.000"))
 
 		err = os.MkdirAll(connectionPath, os.ModePerm)
 		if err != nil {
-			golog.Error("failed mkdirall in connected", "error", err)
+			golog.Error("failed mkdirall in connected", "module", logModule, "udid", device.Properties.SerialNumber, "id", id, "error", err)
 		}
 
 		info := ConnectionInfo{ConnectionPath: connectionPath, CreatedAt: time.Now(), ID: id}
@@ -138,7 +140,7 @@ func (d *DebugProxy) Launch(device ios.DeviceEntry, binaryMode bool) error {
 
 		if !binaryMode {
 			// if the proxy is in full binary mode, there is no point in creating another binary dump
-			golog.Info("creating binary dump of all communication between MAC OS and debugproxy", "path", bindumpHostProxyFile)
+			golog.Info("creating binary dump of all communication between MAC OS and debugproxy", "module", logModule, "udid", device.Properties.SerialNumber, "id", id, "path", bindumpHostProxyFile)
 			conn = NewDumpingConn(bindumpHostProxyFile, conn)
 		}
 
@@ -147,10 +149,10 @@ func (d *DebugProxy) Launch(device ios.DeviceEntry, binaryMode bool) error {
 }
 
 func startProxyConnection(conn net.Conn, originalSocket string, pairRecord ios.PairRecord, debugProxy *DebugProxy, info ConnectionInfo, binaryMode bool) {
-	golog.Info("starting tunnel")
+	golog.Info("starting tunnel", "module", logModule, "id", info.ID)
 	devConn, err := ios.NewDeviceConnection(originalSocket)
 	if err != nil {
-		golog.Error("failed creating device connection", "error", err)
+		golog.Error("failed creating device connection", "module", logModule, "id", info.ID, "error", err)
 		return
 	}
 
@@ -170,10 +172,10 @@ func startProxyConnection(conn net.Conn, originalSocket string, pairRecord ios.P
 
 // Close moves /var/run/usbmuxd.real back to /var/run/usbmuxd and disconnects all active proxy connections
 func (d *DebugProxy) Close() {
-	golog.Info("moving back original socket")
+	golog.Info("moving back original socket", "module", logModule)
 	err := MoveBack(ios.ToUnixSocketPath(ios.GetUsbmuxdSocket()))
 	if err != nil {
-		golog.Error("failed moving back socket", "error", err)
+		golog.Error("failed moving back socket", "module", logModule, "error", err)
 	}
 }
 
@@ -187,11 +189,11 @@ func (d DebugProxy) addConnectionInfoToJsonFile(connInfo ConnectionInfo) {
 	file, err := os.OpenFile(filepath.Join(d.WorkingDir, connectionJSONFileName),
 		os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
-		golog.Info("failed opening connections json file", "error", err)
+		golog.Info("failed opening connections json file", "module", logModule, "id", connInfo.ID, "error", err)
 	}
 	data, err := json.Marshal(connInfo)
 	if err != nil {
-		golog.Info("failed json", "error", err)
+		golog.Info("failed json", "module", logModule, "id", connInfo.ID, "error", err)
 	}
 	file.Write(data)
 	io.WriteString(file, "\n")
@@ -218,7 +220,7 @@ func writeJSON(filePath string, JSON interface{}) {
 	}
 	jsonmsg, err := json.Marshal(JSON)
 	if err != nil {
-		golog.Warn("error encoding to json", "value", JSON, "error", err)
+		golog.Warn("error encoding to json", "module", logModule, "filePath", filePath, "value", JSON, "error", err)
 	}
 	file.Write(jsonmsg)
 	io.WriteString(file, "\n")

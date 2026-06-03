@@ -15,7 +15,7 @@ func MoveSock(socket string) (string, error) {
 	if fileExists(newLocation) {
 		return "", fmt.Errorf("there is already a file named: %s please remove it or restore original usbmuxd before starting the proxy", newLocation)
 	}
-	golog.Info("moving socket", "from", socket, "to", newLocation)
+	golog.Info("moving socket", "module", logModule, "from", socket, "to", newLocation)
 	err := os.Rename(socket, newLocation)
 	return newLocation, err
 }
@@ -30,19 +30,19 @@ func fileExists(filename string) bool {
 
 func MoveBack(socket string) error {
 	newLocation := socket + realSocketSuffix
-	golog.Info("checking if socket exists", "socket", newLocation)
+	golog.Info("checking if socket exists", "module", logModule, "socket", newLocation)
 	if !fileExists(newLocation) {
-		golog.Info("socket does not exist, doing nothing", "socket", newLocation)
+		golog.Info("socket does not exist, doing nothing", "module", logModule, "socket", newLocation)
 		return nil
 	}
-	golog.Info("found socket, deleting fake socket", "socket", newLocation, "fakeSocket", socket)
+	golog.Info("found socket, deleting fake socket", "module", logModule, "socket", newLocation, "fakeSocket", socket)
 
-	golog.Info("deleting fake socket", "socket", socket)
+	golog.Info("deleting fake socket", "module", logModule, "socket", socket)
 	err := os.Remove(socket)
 	if err != nil {
-		golog.Warn("failed deleting socket", "socket", socket, "error", err)
+		golog.Warn("failed deleting socket", "module", logModule, "socket", socket, "error", err)
 	}
-	golog.Info("moving back socket", "from", newLocation, "to", socket)
+	golog.Info("moving back socket", "module", logModule, "from", newLocation, "to", socket)
 	err = os.Rename(newLocation, socket)
 	return err
 }

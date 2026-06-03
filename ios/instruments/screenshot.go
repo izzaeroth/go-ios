@@ -62,7 +62,7 @@ func StartMJPEGStreamingServer(device ios.DeviceEntry, port string) error {
 	go startConversionQueue()
 	http.HandleFunc("/", mjpegHandler)
 	location := fmt.Sprintf("0.0.0.0:%s", port)
-	golog.Info("starting server, open your browser here", "host", "0.0.0.0", "port", port, "url", fmt.Sprintf("http://%s/", location))
+	golog.Info("starting server, open your browser here", "module", logModule, "udid", device.Properties.SerialNumber, "host", "0.0.0.0", "port", port, "url", fmt.Sprintf("http://%s/", location))
 	return http.ListenAndServe(location, nil)
 }
 
@@ -75,18 +75,18 @@ func startConversionQueue() {
 		start := time.Now()
 		img, err := png.Decode(bytes.NewReader(pngBytes))
 		if err != nil {
-			golog.Warn("failed decoding png", "error", err)
+			golog.Warn("failed decoding png", "module", logModule, "error", err)
 			continue
 		}
 		var b bytes.Buffer
 		foo := bufio.NewWriter(&b)
 		err = jpeg.Encode(foo, img, &opt)
 		if err != nil {
-			golog.Warn("failed encoding jpg", "error", err)
+			golog.Warn("failed encoding jpg", "module", logModule, "error", err)
 			continue
 		}
 		elapsed := time.Since(start)
-		golog.Debug("conversion done", "seconds", elapsed.Seconds())
+		golog.Debug("conversion done", "module", logModule, "seconds", elapsed.Seconds())
 		consumers.Range(func(key, value interface{}) bool {
 			c := value.(chan []byte)
 			go func() { c <- b.Bytes() }()
@@ -100,10 +100,10 @@ func startScreenshotting(conn *ScreenshotService) {
 		start := time.Now()
 		pngBytes, err := conn.TakeScreenshot()
 		if err != nil {
-			golog.Fatal("Screenshot failed", "error", err)
+			golog.Fatal("Screenshot failed", "module", logModule, "error", err)
 		}
 		elapsed := time.Since(start)
-		golog.Debug("shot done", "seconds", elapsed.Seconds())
+		golog.Debug("shot done", "module", logModule, "seconds", elapsed.Seconds())
 		conversionQueue <- pngBytes
 	}
 }
@@ -114,7 +114,7 @@ const (
 )
 
 func mjpegHandler(w http.ResponseWriter, r *http.Request) {
-	golog.Info("starting mjpeg stream for new client")
+	golog.Info("starting mjpeg stream for new client", "module", logModule)
 	c := make(chan []byte)
 	consumers.Store(r, c)
 	w.Header().Add("Server", "go-ios-screenshotr-mjpeg-stream")
@@ -145,5 +145,5 @@ func mjpegHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	consumers.Delete(r)
 	close(c)
-	golog.Info("client disconnected")
+	golog.Info("client disconnected", "module", logModule)
 }

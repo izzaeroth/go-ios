@@ -28,7 +28,7 @@ func TestPlistCodec(t *testing.T) {
 			if *update {
 				err := os.WriteFile(golden, []byte(actual), 0o644)
 				if err != nil {
-					golog.Error("failed writing golden file", "error", err)
+					golog.Error("failed writing golden file", "module", "go-ios", "error", err)
 					t.Fail()
 				}
 			}

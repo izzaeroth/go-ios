@@ -47,7 +47,7 @@ func (lockDownConn *LockDownConnection) StartService(serviceName string) (StartS
 	if response.Error != "" {
 		return StartServiceResponse{}, fmt.Errorf("Could not start service:%s with reason:'%s'. Have you mounted the Developer Image?", serviceName, response.Error)
 	}
-	golog.Debug("Service started on device", "Port", response.Port, "Request", response.Request, "Service", response.Service, "EnableServiceSSL", response.EnableServiceSSL)
+	golog.Debug("Service started on device", "module", logModule, "service", serviceName, "Port", response.Port, "Request", response.Request, "Service", response.Service, "EnableServiceSSL", response.EnableServiceSSL)
 	return response, nil
 }
 

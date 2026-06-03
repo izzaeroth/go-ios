@@ -18,7 +18,7 @@ func SetUses24HourClock(device DeviceEntry, enabled bool) error {
 	if err != nil {
 		return err
 	}
-	golog.Debug("setting lockdown value", "key", uses24HourClockKey, "enabled", enabled)
+	golog.Debug("setting lockdown value", "module", logModule, "udid", device.Properties.SerialNumber, "key", uses24HourClockKey, "enabled", enabled)
 	defer lockDownConn.Close()
 	err = lockDownConn.SetValueForDomain(uses24HourClockKey, "", enabled)
 	return err

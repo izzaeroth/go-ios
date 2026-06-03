@@ -7,6 +7,8 @@ import (
 	"github.com/danielpaulus/go-ios/ios/golog"
 )
 
+const logModule = "go-ios/zipconduit"
+
 // sadly apple does not use a standard compliant zip implementation for this
 // so I had to hack my own basic pseudo zip format together.
 // this is for a directory.
@@ -67,7 +69,7 @@ func init() {
 	extra, err := hex.DecodeString(s)
 	zipExtraBytes = extra
 	if err != nil {
-		golog.Fatal("this is impossible to break", "error", err)
+		golog.Fatal("this is impossible to break", "module", logModule, "error", err)
 	}
 }
 

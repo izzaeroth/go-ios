@@ -39,9 +39,9 @@ func proxyLockDownConnection(p *ProxyConnection, lockdownOnUnixSocket *ios.LockD
 		p.log.Info("done sending to device")
 		response, err := lockdownToDevice.ReadMessage()
 		if err != nil {
-			golog.Error("error reading from device", "error", err)
+			golog.Error("error reading from device", "module", logModule, "id", p.id, "error", err)
 			response, err = lockdownToDevice.ReadMessage()
-			golog.Info("second read", "response", response, "error", err)
+			golog.Info("second read", "module", logModule, "id", p.id, "response", response, "error", err)
 		}
 
 		var decodedResponse map[string]interface{}

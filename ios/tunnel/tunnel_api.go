@@ -41,13 +41,13 @@ func IsAgentRunning() bool {
 }
 func WaitUntilAgentReady() bool {
 	for {
-		golog.Info("Waiting for go-ios agent to be ready...")
+		golog.Info("Waiting for go-ios agent to be ready...", "module", logModule)
 		resp, err := netClient.Get(fmt.Sprintf("http://%s:%d/ready", ios.HttpApiHost(), ios.HttpApiPort()))
 		if err != nil {
 			return false
 		}
 		if resp.StatusCode == http.StatusOK {
-			golog.Info("Go-iOS Agent is ready")
+			golog.Info("Go-iOS Agent is ready", "module", logModule)
 			return true
 		}
 	}
@@ -57,7 +57,7 @@ func RunAgent(mode string, args ...string) error {
 	if IsAgentRunning() {
 		return nil
 	}
-	golog.Info("Go-iOS Agent not running, starting it on port", "port", ios.HttpApiPort())
+	golog.Info("Go-iOS Agent not running, starting it on port", "module", logModule, "port", ios.HttpApiPort())
 	ex, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("RunAgent: failed to get executable path: %w", err)
@@ -109,7 +109,7 @@ func ServeTunnelInfo(tm *TunnelManager, port int) error {
 	mux.HandleFunc("/shutdown", func(writer http.ResponseWriter, request *http.Request) {
 		err := tm.Close()
 		if err != nil {
-			golog.Error("failed to close tunnel manager", "error", err)
+			golog.Error("failed to close tunnel manager", "module", logModule, "error", err)
 		}
 		writer.WriteHeader(http.StatusOK)
 		writer.Write([]byte("shutting down in 1 second..."))
@@ -245,13 +245,13 @@ func (m *TunnelManager) Close() error {
 	m.closeOnce.Do(func() {
 		tunnels, err := m.ListTunnels()
 		if err != nil {
-			golog.Error("failed to list tunnels", "error", err)
+			golog.Error("failed to list tunnels", "module", logModule, "error", err)
 		}
 		for _, t := range tunnels {
 			err := t.Close()
 			baseErr = errors.Join(baseErr, err)
 			if err != nil {
-				golog.Error("failed to stop tunnel", "udid", t.Udid, "error", err)
+				golog.Error("failed to stop tunnel", "module", logModule, "udid", t.Udid, "error", err)
 			}
 		}
 	})
@@ -290,7 +290,7 @@ func (m *TunnelManager) UpdateTunnels(ctx context.Context) error {
 		}
 		t, err := m.startTunnel(ctx, d)
 		if err != nil {
-			golog.Warn("failed to start tunnel", "udid", udid, "error", err)
+			golog.Warn("failed to start tunnel", "module", logModule, "udid", udid, "error", err)
 			continue
 		}
 		m.mux.Lock()
@@ -326,14 +326,14 @@ func (m *TunnelManager) RemoveTunnel(ctx context.Context, serialNumber string) e
 func (m *TunnelManager) stopTunnel(t Tunnel) error {
 	m.mux.Lock()
 	defer m.mux.Unlock()
-	golog.Info("stopping tunnel", "udid", t.Udid)
+	golog.Info("stopping tunnel", "module", logModule, "udid", t.Udid)
 	delete(m.tunnels, t.Udid)
 
 	return t.Close()
 }
 
 func (m *TunnelManager) startTunnel(ctx context.Context, device ios.DeviceEntry) (Tunnel, error) {
-	golog.Info("start tunnel", "udid", device.Properties.SerialNumber)
+	golog.Info("start tunnel", "module", logModule, "udid", device.Properties.SerialNumber)
 	startTunnelCtx, cancel := context.WithTimeout(ctx, m.startTunnelTimeout)
 	defer cancel()
 	version, err := ios.GetProductVersion(device)

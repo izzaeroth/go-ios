@@ -14,6 +14,8 @@ import (
 
 const serviceName string = "com.apple.mobile.mobile_image_mounter"
 
+const logModule = "go-ios/imagemounter"
+
 // DeveloperDiskImageMounter to mobile image mounter
 type DeveloperDiskImageMounter struct {
 	deviceConn ios.DeviceConnectionInterface
@@ -80,7 +82,7 @@ func (conn *DeveloperDiskImageMounter) MountImage(imagePath string) error {
 	}
 	defer imageFile.Close()
 	n, err := io.Copy(conn.deviceConn.Writer(), imageFile)
-	golog.Debug("bytes written", "count", n)
+	golog.Debug("bytes written", "module", logModule, "imagePath", imagePath, "count", n)
 	if err != nil {
 		return err
 	}
@@ -101,7 +103,7 @@ func (conn *DeveloperDiskImageMounter) UnmountImage() error {
 		"Command":   "UnmountImage",
 		"MountPath": "/Developer",
 	}
-	golog.Debug("sending", "request", req)
+	golog.Debug("sending", "module", logModule, "request", req)
 	err := conn.plistRw.Write(req)
 	if err != nil {
 		return err
@@ -115,7 +117,7 @@ func (conn *DeveloperDiskImageMounter) mountImage(signatureBytes []byte) error {
 		"ImageSignature": signatureBytes,
 		"ImageType":      "Developer",
 	}
-	golog.Debug("sending", "request", req)
+	golog.Debug("sending", "module", logModule, "request", req)
 	err := conn.plistRw.Write(req)
 	if err != nil {
 		return err
@@ -166,7 +168,7 @@ func waitForUploadComplete(plistRw ios.PlistCodecReadWriter) error {
 	if err != nil {
 		return err
 	}
-	golog.Debug("received complete", "response", plist)
+	golog.Debug("received complete", "module", logModule, "response", plist)
 	status, ok := plist["Status"]
 	if !ok {
 		return fmt.Errorf("unexpected response: %+v", plist)
@@ -181,7 +183,7 @@ func hangUp(plistRw ios.PlistCodecReadWriter) error {
 	req := map[string]interface{}{
 		"Command": "Hangup",
 	}
-	golog.Debug("sending", "request", req)
+	golog.Debug("sending", "module", logModule, "request", req)
 	return plistRw.Write(req)
 }
 
@@ -197,7 +199,7 @@ func MountImage(device ios.DeviceEntry, path string) error {
 		return fmt.Errorf("failed getting image list: %v", err)
 	}
 	if len(signatures) != 0 {
-		golog.Warn("there is already a developer image mounted, reboot the device if you want to remove it. aborting.")
+		golog.Warn("there is already a developer image mounted, reboot the device if you want to remove it. aborting.", "module", logModule, "udid", device.Properties.SerialNumber, "imagePath", path)
 		return nil
 	}
 	return conn.MountImage(path)
@@ -259,7 +261,7 @@ func sendUploadRequest(plistRw ios.PlistCodecReadWriter, imageType string, signa
 		"ImageSize":      fileSize,
 		"ImageType":      imageType,
 	}
-	golog.Debug("sending", "request", req)
+	golog.Debug("sending", "module", logModule, "imageType", imageType, "request", req)
 	err := plistRw.Write(req)
 	if err != nil {
 		return fmt.Errorf("sendUploadRequest: failed to write command 'ReceiveBytes': %w", err)
@@ -270,7 +272,7 @@ func sendUploadRequest(plistRw ios.PlistCodecReadWriter, imageType string, signa
 	if err != nil {
 		return fmt.Errorf("sendUploadRequest: failed to read response for 'ReceiveBytes': %w", err)
 	}
-	golog.Debug("upload response", "response", plist)
+	golog.Debug("upload response", "module", logModule, "imageType", imageType, "response", plist)
 	status, ok := plist["Status"]
 	if !ok {
 		return fmt.Errorf("sendUploadRequest: unexpected response: %+v", plist)

@@ -87,7 +87,7 @@ func (p ProcessControl) StartProcess(bundleID string, envVars map[string]interfa
 	// seems like the path does not matter
 	const path = "/private/"
 
-	golog.Info("Launching process", "channel_id", procControlChannel, "bundleID", bundleID)
+	golog.Info("Launching process", "module", logModule, "channel_id", procControlChannel, "bundleID", bundleID)
 
 	msg, err := p.processControlChannel.MethodCall(
 		"launchSuspendedProcessWithDevicePath:bundleIdentifier:environment:arguments:options:",
@@ -97,14 +97,14 @@ func (p ProcessControl) StartProcess(bundleID string, envVars map[string]interfa
 		arguments,
 		options)
 	if err != nil {
-		golog.Error("failed starting process", "channel_id", procControlChannel, "error", err, "bundleID", bundleID)
+		golog.Error("failed starting process", "module", logModule, "channel_id", procControlChannel, "error", err, "bundleID", bundleID)
 		return 0, err
 	}
 	if msg.HasError() {
 		return 0, fmt.Errorf("Failed starting process: %s, msg:%v", bundleID, msg.Payload[0])
 	}
 	if pid, ok := msg.Payload[0].(uint64); ok {
-		golog.Info("Process started successfully", "channel_id", procControlChannel, "pid", pid)
+		golog.Info("Process started successfully", "module", logModule, "channel_id", procControlChannel, "pid", pid)
 		return pid, nil
 	}
 	return 0, fmt.Errorf("pid returned in payload was not of type uint64 for processcontroll.startprocess, instead: %s", msg.Payload)

@@ -18,6 +18,10 @@ import (
 	plist "howett.net/plist"
 )
 
+// logModule identifies this package in structured logs. It is injected as the
+// "module" attribute on every golog call in this package.
+const logModule = "go-ios"
+
 // UseHttpProxy sets the default http transport to use the given proxy url.
 // If the proxyUrl is empty, it will try to use the HTTP_PROXY or HTTPS_PROXY environment variables.
 // If the environment variables are not set, it will not set a proxy.
@@ -105,10 +109,10 @@ func GetDeviceWithAddress(udid string, address string, provider RsdPortProvider)
 	if udid == "" {
 		udid = os.Getenv("udid")
 		if udid != "" {
-			golog.Info("using udid from env.udid variable")
+			golog.Info("using udid from env.udid variable", "module", logModule, "udid", udid)
 		}
 	}
-	golog.Debug("Looking for device", "udid", udid)
+	golog.Debug("Looking for device", "module", logModule, "udid", udid)
 	deviceList, err := ListDevices()
 	if err != nil {
 		return DeviceEntry{}, err
@@ -118,7 +122,7 @@ func GetDeviceWithAddress(udid string, address string, provider RsdPortProvider)
 			return DeviceEntry{}, errors.New("no iOS devices are attached to this host")
 		}
 		device := deviceList.DeviceList[0]
-		golog.Info("no udid specified using first device in list", "udid", device.Properties.SerialNumber)
+		golog.Info("no udid specified using first device in list", "module", logModule, "udid", device.Properties.SerialNumber)
 		device.Address = address
 		device.Rsd = provider
 		return device, nil

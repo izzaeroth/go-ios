@@ -77,7 +77,7 @@ func (t *tunnelService) ManualPair() error {
 	if err == nil {
 		return nil
 	}
-	golog.Info("pair verify failed", "error", err)
+	golog.Info("pair verify failed", "module", logModule, "error", err)
 
 	err = t.setupManualPairing()
 	if err != nil {
@@ -108,7 +108,7 @@ func (t *tunnelService) ManualPair() error {
 }
 
 func (t *tunnelService) createTunnelListener() (tunnelListener, error) {
-	golog.Info("create tunnel listener")
+	golog.Info("create tunnel listener", "module", logModule)
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 
 	if err != nil {
@@ -346,7 +346,7 @@ func (t *tunnelService) verifyPair() error {
 		return err
 	}
 	if len(errRes) > 0 {
-		golog.Debug("send pair verify failed event")
+		golog.Debug("send pair verify failed event", "module", logModule)
 		err := t.controlChannel.writeEvent(pairVerifyFailed{})
 		if err != nil {
 			return err

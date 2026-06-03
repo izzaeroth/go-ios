@@ -18,7 +18,7 @@ func SetZoomTouch(device DeviceEntry, enabled bool) error {
 	if err != nil {
 		return err
 	}
-	golog.Debug("setting lockdown value", "key", zoomTouchKey, "enabled", enabled)
+	golog.Debug("setting lockdown value", "module", logModule, "udid", device.Properties.SerialNumber, "key", zoomTouchKey, "enabled", enabled)
 	defer lockDownConn.Close()
 	err = lockDownConn.SetValueForDomain(zoomTouchKey, accessibilityDomain, enabled)
 	return err

@@ -45,14 +45,14 @@ func initTUNwrapper(device Device) *tunWrapper {
 	}
 
 	mtu, _ := t.device.MTU()
-	golog.Info("tun wrapper initialized", "batchSize", device.BatchSize(), "mtu", mtu)
+	golog.Info("tun wrapper initialized", "module", logModule, "batchSize", device.BatchSize(), "mtu", mtu)
 
 	t.buffer = make([][]byte, 1)
 	t.buffer[0] = make([]byte, mtu)
 	go func() {
 		for {
 			e := <-device.Events()
-			golog.Info("tun device event", "event", e)
+			golog.Info("tun device event", "module", logModule, "event", e)
 		}
 	}()
 	return t
@@ -107,7 +107,7 @@ func setupTunnelInterface(tunnelInfo tunnelParameters) (io.ReadWriteCloser, erro
 	if err != nil {
 		return nil, fmt.Errorf("setupTunnelInterface: failed to set IP address for interface: %w", err)
 	}
-	golog.Info("windows cmd", "cmd", setIpAddr.String())
+	golog.Info("windows cmd", "module", logModule, "cmd", setIpAddr.String())
 
 	return initTUNwrapper(tunDevice), nil
 }

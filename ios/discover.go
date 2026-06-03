@@ -27,7 +27,7 @@ func FindDeviceInterfaceAddress(ctx context.Context, device DeviceEntry) (string
 	for _, iface := range ifaces {
 		resolver, err := zeroconf.NewResolver(zeroconf.SelectIfaces([]net.Interface{iface}), zeroconf.SelectIPTraffic(zeroconf.IPv6))
 		if err != nil {
-			golog.Debug("failed to initialize resolver", "interface", iface.Name, "err", err)
+			golog.Debug("failed to initialize resolver", "module", logModule, "udid", device.Properties.SerialNumber, "interface", iface.Name, "err", err)
 			continue
 		}
 		entries := make(chan *zeroconf.ServiceEntry)
@@ -40,7 +40,7 @@ func FindDeviceInterfaceAddress(ctx context.Context, device DeviceEntry) (string
 	case <-ctx.Done():
 		return "", ctx.Err()
 	case r := <-result:
-		golog.Debug("found device address", "udid", device.Properties.SerialNumber, "address", r)
+		golog.Debug("found device address", "module", logModule, "udid", device.Properties.SerialNumber, "address", r)
 		return r, nil
 	}
 }
@@ -68,7 +68,7 @@ func tryHandshake(ctx context.Context, ip6 net.IP, port int, interfaceName strin
 	s, err := NewWithAddrPortDevice(addr, port, device)
 	udid := device.Properties.SerialNumber
 	if err != nil {
-		golog.Error("failed to connect to remote service discovery", "error", err, "address", addr)
+		golog.Error("failed to connect to remote service discovery", "module", logModule, "udid", udid, "error", err, "address", addr)
 		return
 	}
 	defer s.Close()
@@ -79,7 +79,7 @@ func tryHandshake(ctx context.Context, ip6 net.IP, port int, interfaceName strin
 	if udid == h.Udid {
 		select {
 		case <-ctx.Done():
-			golog.Error("failed sending handshake result", "error", ctx.Err())
+			golog.Error("failed sending handshake result", "module", logModule, "udid", udid, "error", ctx.Err())
 		case result <- addr:
 		}
 	}

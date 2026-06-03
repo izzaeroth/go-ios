@@ -13,12 +13,12 @@ import (
 
 func proxyUsbMuxConnection(p *ProxyConnection, muxOnUnixSocket *ios.UsbMuxConnection, muxToDevice *ios.UsbMuxConnection) {
 	defer func() {
-		golog.Info("done") // logged normally even if there is a panic
+		golog.Info("done", "module", logModule, "id", p.id) // logged normally even if there is a panic
 		if x := recover(); x != nil {
-			golog.Info("run time panic, moving back socket", "panic", x)
+			golog.Info("run time panic, moving back socket", "module", logModule, "id", p.id, "panic", x)
 			err := MoveBack(ios.ToUnixSocketPath(ios.GetUsbmuxdSocket()))
 			if err != nil {
-				golog.Error("failed moving back socket", "error", err)
+				golog.Error("failed moving back socket", "module", logModule, "id", p.id, "error", err)
 			}
 			panic(x)
 		}

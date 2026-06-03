@@ -19,7 +19,7 @@ func NewDumpingConn(filePath string, conn net.Conn) *DumpingConn {
 	fileHandle, err := os.OpenFile(filePath,
 		os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
-		golog.Info("failed opening dump file", "error", err)
+		golog.Info("failed opening dump file", "module", logModule, "filePath", filePath, "error", err)
 	}
 	dc := DumpingConn{fileHandle: fileHandle, conn: conn}
 	return &dc
@@ -48,7 +48,7 @@ func (d DumpingConn) Write(b []byte) (n int, err error) {
 func (d DumpingConn) Close() error {
 	err := d.fileHandle.Close()
 	if err != nil {
-		golog.Warn("failed closing bin file handle", "error", err)
+		golog.Warn("failed closing bin file handle", "module", logModule, "error", err)
 	}
 	return d.conn.Close()
 }

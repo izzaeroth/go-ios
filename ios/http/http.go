@@ -10,6 +10,8 @@ import (
 	"golang.org/x/net/http2"
 )
 
+const logModule = "go-ios/http"
+
 type StreamId uint32
 
 const (
@@ -68,7 +70,7 @@ func NewHttpConnection(rw io.ReadWriteCloser) (*HttpConnection, error) {
 			return nil, fmt.Errorf("NewHttpConnection: could not write settings ack. %w", err)
 		}
 	} else {
-		golog.Warn("expected setttings frame", "frame", frame.Header().String())
+		golog.Warn("expected setttings frame", "module", logModule, "frame", frame.Header().String())
 	}
 
 	return &HttpConnection{

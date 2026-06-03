@@ -17,6 +17,8 @@ import (
 
 const serviceName string = "com.apple.dt.simulatelocation"
 
+const logModule = "go-ios/simlocation"
+
 type Connection struct {
 	deviceConn ios.DeviceConnectionInterface
 	plistCodec ios.PlistCodec
@@ -66,7 +68,7 @@ func SetLocation(device ios.DeviceEntry, lat string, lon string) error {
 	data.lat = latitude
 	data.lon = longitude
 
-	golog.Info("Simulating device location", "latitude", latitude, "longitude", longitude)
+	golog.Info("Simulating device location", "module", logModule, "udid", device.Properties.SerialNumber, "latitude", latitude, "longitude", longitude)
 
 	// Generate the byte data needed by the service to set the location
 	locationBytes, err := data.LocationBytes()

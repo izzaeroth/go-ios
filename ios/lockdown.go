@@ -47,7 +47,7 @@ func (lockDownConn LockDownConnection) EnableSessionSslServerMode(pairRecord Pai
 func (lockDownConn LockDownConnection) Send(msg interface{}) error {
 	bytes, err := lockDownConn.plistCodec.Encode(msg)
 	if err != nil {
-		golog.Error("failed lockdown send")
+		golog.Error("failed lockdown send", "module", logModule)
 		return err
 	}
 	return lockDownConn.deviceConnection.Send(bytes)

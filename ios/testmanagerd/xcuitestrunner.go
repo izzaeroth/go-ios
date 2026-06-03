@@ -57,7 +57,7 @@ func (xdc XCTestManager_DaemonConnectionInterface) startExecutingTestPlanWithPro
 func (xdc XCTestManager_DaemonConnectionInterface) authorizeTestSessionWithProcessID(pid uint64) (bool, error) {
 	rply, err := xdc.IDEDaemonProxy.MethodCall("_IDE_authorizeTestSessionWithProcessID:", pid)
 	if err != nil {
-		golog.Error("authorizeTestSessionWithProcessID failed", "pid", pid, "error", err)
+		golog.Error("authorizeTestSessionWithProcessID failed", "module", logModule, "pid", pid, "error", err)
 		return false, err
 	}
 	returnValue := rply.Payload[0]
@@ -66,7 +66,7 @@ func (xdc XCTestManager_DaemonConnectionInterface) authorizeTestSessionWithProce
 	if val, ok = returnValue.(bool); !ok {
 		return val, fmt.Errorf("_IDE_authorizeTestSessionWithProcessID: got wrong returnvalue: %s", rply.Payload)
 	}
-	golog.Debug("_IDE_authorizeTestSessionWithProcessID: reply", "channel_id", ideToDaemonProxyChannelName, "reply", rply)
+	golog.Debug("_IDE_authorizeTestSessionWithProcessID: reply", "module", logModule, "pid", pid, "channel_id", ideToDaemonProxyChannelName, "reply", rply)
 
 	return val, err
 }
@@ -76,14 +76,14 @@ func (xdc XCTestManager_DaemonConnectionInterface) initiateSessionWithIdentifier
 	var ok bool
 	rply, err := xdc.IDEDaemonProxy.MethodCall("_IDE_initiateSessionWithIdentifier:capabilities:", nskeyedarchiver.NewNSUUID(uuid), caps)
 	if err != nil {
-		golog.Error("initiateSessionWithIdentifierAndCaps failed", "error", err)
+		golog.Error("initiateSessionWithIdentifierAndCaps failed", "module", logModule, "channel_id", ideToDaemonProxyChannelName, "error", err)
 		return val, err
 	}
 	returnValue := rply.Payload[0]
 	if val, ok = returnValue.(nskeyedarchiver.XCTCapabilities); !ok {
 		return val, fmt.Errorf("_IDE_initiateSessionWithIdentifier:capabilities: got wrong returnvalue: %s", rply.Payload)
 	}
-	golog.Debug("_IDE_initiateSessionWithIdentifier:capabilities: reply", "channel_id", ideToDaemonProxyChannelName, "reply", rply)
+	golog.Debug("_IDE_initiateSessionWithIdentifier:capabilities: reply", "module", logModule, "channel_id", ideToDaemonProxyChannelName, "reply", rply)
 
 	return val, err
 }
@@ -93,7 +93,7 @@ func (xdc XCTestManager_DaemonConnectionInterface) initiateControlSessionWithCap
 	var ok bool
 	rply, err := xdc.IDEDaemonProxy.MethodCall("_IDE_initiateControlSessionWithCapabilities:", caps)
 	if err != nil {
-		golog.Error("initiateControlSessionWithCapabilities failed", "error", err)
+		golog.Error("initiateControlSessionWithCapabilities failed", "module", logModule, "channel_id", ideToDaemonProxyChannelName, "error", err)
 		return val, err
 	}
 	returnValue := rply.Payload[0]
@@ -101,13 +101,13 @@ func (xdc XCTestManager_DaemonConnectionInterface) initiateControlSessionWithCap
 	if val, ok = returnValue.(nskeyedarchiver.XCTCapabilities); !ok {
 		return val, fmt.Errorf("_IDE_initiateControlSessionWithCapabilities got wrong returnvalue: %s", rply.Payload)
 	}
-	golog.Debug("_IDE_initiateControlSessionWithCapabilities reply", "channel_id", ideToDaemonProxyChannelName, "reply", rply)
+	golog.Debug("_IDE_initiateControlSessionWithCapabilities reply", "module", logModule, "channel_id", ideToDaemonProxyChannelName, "reply", rply)
 
 	return val, err
 }
 
 func (xdc XCTestManager_DaemonConnectionInterface) initiateSessionWithIdentifier(sessionIdentifier uuid.UUID, protocolVersion uint64) (uint64, error) {
-	golog.Debug("Launching init test Session", "channel_id", ideToDaemonProxyChannelName)
+	golog.Debug("Launching init test Session", "module", logModule, "channel_id", ideToDaemonProxyChannelName)
 	var val uint64
 	var ok bool
 	rply, err := xdc.IDEDaemonProxy.MethodCall(
@@ -117,14 +117,14 @@ func (xdc XCTestManager_DaemonConnectionInterface) initiateSessionWithIdentifier
 		"/Applications/Xcode.app",
 		protocolVersion)
 	if err != nil {
-		golog.Error("initiateSessionWithIdentifier failed", "error", err)
+		golog.Error("initiateSessionWithIdentifier failed", "module", logModule, "channel_id", ideToDaemonProxyChannelName, "error", err)
 		return val, err
 	}
 	returnValue := rply.Payload[0]
 	if val, ok = returnValue.(uint64); !ok {
 		return 0, fmt.Errorf("initiateSessionWithIdentifier got wrong returnvalue: %s", rply.Payload)
 	}
-	golog.Debug("init test session reply", "channel_id", ideToDaemonProxyChannelName, "reply", rply)
+	golog.Debug("init test session reply", "module", logModule, "channel_id", ideToDaemonProxyChannelName, "reply", rply)
 
 	return val, err
 }
@@ -134,7 +134,7 @@ func (xdc XCTestManager_DaemonConnectionInterface) initiateControlSessionForTest
 	if err != nil {
 		return err
 	}
-	golog.Debug("initiateControlSessionForTestProcessID reply", "channel_id", ideToDaemonProxyChannelName, "reply", rply)
+	golog.Debug("initiateControlSessionForTestProcessID reply", "module", logModule, "pid", pid, "channel_id", ideToDaemonProxyChannelName, "reply", rply)
 	return nil
 }
 
@@ -149,7 +149,7 @@ func (xdc XCTestManager_DaemonConnectionInterface) initiateControlSessionWithPro
 	if val, ok = returnValue.(uint64); !ok {
 		return val, fmt.Errorf("_IDE_initiateControlSessionWithProtocolVersion got wrong returnvalue: %s", rply.Payload)
 	}
-	golog.Debug("initiateControlSessionForTestProcessID reply", "channel_id", ideToDaemonProxyChannelName, "reply", rply)
+	golog.Debug("initiateControlSessionForTestProcessID reply", "module", logModule, "channel_id", ideToDaemonProxyChannelName, "reply", rply)
 	return val, nil
 }
 
@@ -163,9 +163,11 @@ func startExecutingTestPlanWithProtocolVersion(channel *dtx.Channel, protocolVer
 	if err != nil {
 		return err
 	}
-	golog.Debug("_IDE_startExecutingTestPlanWithProtocolVersion reply", "channel_id", ideToDaemonProxyChannelName, "reply", rply)
+	golog.Debug("_IDE_startExecutingTestPlanWithProtocolVersion reply", "module", logModule, "channel_id", ideToDaemonProxyChannelName, "reply", rply)
 	return nil
 }
+
+const logModule = "go-ios/testmanagerd"
 
 const ideToDaemonProxyChannelName = "dtxproxy:XCTestManager_IDEInterface:XCTestManager_DaemonConnectionInterface"
 
@@ -291,16 +293,16 @@ func RunTestWithConfig(ctx context.Context, testConfig TestConfig) ([]TestSuite,
 	}
 
 	if version.LessThan(ios.IOS14()) {
-		golog.Debug("iOS version detected, running with ios11 support", "version", version)
+		golog.Debug("iOS version detected, running with ios11 support", "module", logModule, "udid", testConfig.Device.Properties.SerialNumber, "version", version)
 		return runXCUIWithBundleIdsXcode11Ctx(ctx, testConfig, version)
 	}
 
 	if version.LessThan(ios.IOS17()) {
-		golog.Debug("iOS version detected, running with ios14 support", "version", version)
+		golog.Debug("iOS version detected, running with ios14 support", "module", logModule, "udid", testConfig.Device.Properties.SerialNumber, "version", version)
 		return runXUITestWithBundleIdsXcode12Ctx(ctx, testConfig, version)
 	}
 
-	golog.Debug("iOS version detected, running with ios17 support", "version", version)
+	golog.Debug("iOS version detected, running with ios17 support", "module", logModule, "udid", testConfig.Device.Properties.SerialNumber, "version", version)
 	return runXUITestWithBundleIdsXcode15Ctx(ctx, testConfig, version)
 }
 
@@ -369,7 +371,7 @@ func runXUITestWithBundleIdsXcode15Ctx(
 	if err != nil {
 		return make([]TestSuite, 0), fmt.Errorf("runXUITestWithBundleIdsXcode15Ctx: cannot initiate a IDE session: %w", err)
 	}
-	golog.Info("got capabilities", "receivedCaps", receivedCaps)
+	golog.Info("got capabilities", "module", logModule, "udid", config.Device.Properties.SerialNumber, "receivedCaps", receivedCaps)
 
 	appserviceConn, err := appservice.New(config.Device)
 	if err != nil {
@@ -386,7 +388,7 @@ func runXUITestWithBundleIdsXcode15Ctx(
 	go func() {
 		_, err := io.Copy(config.Listener.logWriter, testRunnerLaunch)
 		if err != nil {
-			golog.Warn("copying stdout failed", "error", err)
+			golog.Warn("copying stdout failed", "module", logModule, "udid", config.Device.Properties.SerialNumber, "error", err)
 		}
 	}()
 
@@ -395,12 +397,12 @@ func runXUITestWithBundleIdsXcode15Ctx(
 	if err != nil {
 		return make([]TestSuite, 0), fmt.Errorf("runXUITestWithBundleIdsXcode15Ctx: cannot initiate a control session with capabilities: %w", err)
 	}
-	golog.Info("got capabilities", "caps", caps)
+	golog.Info("got capabilities", "module", logModule, "udid", config.Device.Properties.SerialNumber, "caps", caps)
 	authorized, err := ideDaemonProxy2.daemonConnection.authorizeTestSessionWithProcessID(uint64(testRunnerLaunch.Pid))
 	if err != nil {
 		return make([]TestSuite, 0), fmt.Errorf("runXUITestWithBundleIdsXcode15Ctx: cannot authorize test session: %w", err)
 	}
-	golog.Info("authorized", "authorized", authorized)
+	golog.Info("authorized", "module", logModule, "udid", config.Device.Properties.SerialNumber, "pid", testRunnerLaunch.Pid, "authorized", authorized)
 
 	ideInterfaceChannel := ideDaemonProxy1.dtxConnection.ForChannelRequest(proxyDispatcher{id: "dtxproxy:XCTestDriverInterface:XCTestManager_IDEInterface"})
 
@@ -412,16 +414,16 @@ func runXUITestWithBundleIdsXcode15Ctx(
 
 	select {
 	case <-conn1.Closed():
-		golog.Debug("conn1 closed")
+		golog.Debug("conn1 closed", "module", logModule, "udid", config.Device.Properties.SerialNumber)
 		if !errors.Is(conn1.Err(), dtx.ErrConnectionClosed) {
-			golog.Error("conn1 closed unexpectedly", "error", conn1.Err())
+			golog.Error("conn1 closed unexpectedly", "module", logModule, "udid", config.Device.Properties.SerialNumber, "error", conn1.Err())
 		}
 		config.Listener.FinishWithError(errors.New("lost connection to testmanagerd. the test-runner may have been killed"))
 		break
 	case <-conn2.Closed():
-		golog.Debug("conn2 closed")
+		golog.Debug("conn2 closed", "module", logModule, "udid", config.Device.Properties.SerialNumber)
 		if !errors.Is(conn2.Err(), dtx.ErrConnectionClosed) {
-			golog.Error("conn2 closed unexpectedly", "error", conn2.Err())
+			golog.Error("conn2 closed unexpectedly", "module", logModule, "udid", config.Device.Properties.SerialNumber, "error", conn2.Err())
 		}
 		config.Listener.FinishWithError(errors.New("lost connection to testmanagerd. the test-runner may have been killed"))
 		break
@@ -430,15 +432,15 @@ func runXUITestWithBundleIdsXcode15Ctx(
 	case <-ctx.Done():
 		break
 	}
-	golog.Info("Killing test runner", "pid", testRunnerLaunch.Pid)
+	golog.Info("Killing test runner", "module", logModule, "udid", config.Device.Properties.SerialNumber, "pid", testRunnerLaunch.Pid)
 	err = killTestRunner(appserviceConn, testRunnerLaunch.Pid)
 	if err != nil {
-		golog.Info("Nothing to kill, process is already dead", "pid", testRunnerLaunch.Pid)
+		golog.Info("Nothing to kill, process is already dead", "module", logModule, "udid", config.Device.Properties.SerialNumber, "pid", testRunnerLaunch.Pid)
 	} else {
-		golog.Info("Test runner killed with success")
+		golog.Info("Test runner killed with success", "module", logModule, "udid", config.Device.Properties.SerialNumber)
 	}
 
-	golog.Debug("Done running test")
+	golog.Debug("Done running test", "module", logModule, "udid", config.Device.Properties.SerialNumber)
 
 	return config.Listener.TestSuites, config.Listener.err
 }
@@ -448,12 +450,12 @@ type processKiller interface {
 }
 
 func killTestRunner(killer processKiller, pid int) error {
-	golog.Info("Killing test runner", "pid", pid)
+	golog.Info("Killing test runner", "module", logModule, "pid", pid)
 	err := killer.KillProcess(pid)
 	if err != nil {
 		return err
 	}
-	golog.Info("Test runner killed with success")
+	golog.Info("Test runner killed with success", "module", logModule, "pid", pid)
 
 	return nil
 }
@@ -490,7 +492,7 @@ func startTestRunner17(appserviceConn *appservice.Connection, bundleID string, s
 		maps.Copy(env, testEnv)
 
 		for key, value := range testEnv {
-			golog.Debug("adding extra env", "key", key, "value", value)
+			golog.Debug("adding extra env", "module", logModule, "bundleID", bundleID, "key", key, "value", value)
 		}
 	}
 	var opts = map[string]interface{}{}
@@ -545,7 +547,7 @@ func setupXcuiTest(device ios.DeviceEntry, bundleID string, testRunnerBundleID s
 		if err != nil {
 			return uuid.UUID{}, "", nskeyedarchiver.XCTestConfiguration{}, testInfo{}, err
 		}
-		golog.Debug("app info found", "appInfo", appInfo)
+		golog.Debug("app info found", "module", logModule, "udid", device.Properties.SerialNumber, "appInfo", appInfo)
 
 		info.targetApp = appInfo
 	}
@@ -555,7 +557,7 @@ func setupXcuiTest(device ios.DeviceEntry, bundleID string, testRunnerBundleID s
 		return uuid.UUID{}, "", nskeyedarchiver.XCTestConfiguration{}, testInfo{}, err
 	}
 	defer houseArrestService.Close()
-	golog.Debug("creating test config")
+	golog.Debug("creating test config", "module", logModule, "udid", device.Properties.SerialNumber)
 	testConfigPath, testConfig, err := createTestConfigOnDevice(testSessionID, info, houseArrestService, xctestConfigFileName, testsToRun, testsToSkip, isXCTest, version)
 	if err != nil {
 		return uuid.UUID{}, "", nskeyedarchiver.XCTestConfiguration{}, testInfo{}, err
@@ -631,13 +633,13 @@ func getappInfo(bundleID string, apps []installationproxy.AppInfo) (appInfo, err
 func getUserInstalledApps(err error, device ios.DeviceEntry) []installationproxy.AppInfo {
 	svc, err := installationproxy.New(device)
 	if err != nil {
-		golog.Debug("we couldn't create ios device connection", "error", err)
+		golog.Debug("we couldn't create ios device connection", "module", logModule, "udid", device.Properties.SerialNumber, "error", err)
 		return nil
 	}
 	defer svc.Close()
 	installedApps, err := svc.BrowseUserApps()
 	if err != nil {
-		golog.Debug("we couldn't fetch the installed user apps", "error", err)
+		golog.Debug("we couldn't fetch the installed user apps", "module", logModule, "udid", device.Properties.SerialNumber, "error", err)
 		return nil
 	}
 	return installedApps

@@ -17,6 +17,8 @@ import (
 	"howett.net/plist"
 )
 
+const logModule = "go-ios/debugserver"
+
 const (
 	serviceName    = "com.apple.debugserver"
 	sslServiceName = "com.apple.debugserver.DVTSecureSocketProxy"
@@ -147,7 +149,7 @@ func connectToDevice(device ios.DeviceEntry) (ios.DeviceConnectionInterface, err
 	}
 	version, ok := info["ProductVersion"]
 	if !ok {
-		golog.Error("cannot find version, default use ssl debug server")
+		golog.Error("cannot find version, default use ssl debug server", "module", logModule, "udid", device.Properties.SerialNumber)
 		return ios.ConnectToService(device, sslServiceName)
 	}
 	if version.(string) > "14" {
@@ -191,16 +193,16 @@ func Start(device ios.DeviceEntry, appPath string, stopAtEntry bool) error {
 	// listen at random port
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		golog.Fatal("failed to listen", "error", err)
+		golog.Fatal("failed to listen", "module", logModule, "udid", device.Properties.SerialNumber, "appPath", appPath, "error", err)
 	}
 	defer listener.Close()
 	port := listener.Addr().(*net.TCPAddr).Port
-	golog.Info("debug proxy listening", "port", port)
+	golog.Info("debug proxy listening", "module", logModule, "udid", device.Properties.SerialNumber, "port", port)
 	go func() {
 		time.Sleep(time.Second)
 		err := startLLDB(appPath, container, port, stopAtEntry)
 		if err != nil {
-			golog.Fatal("lldb failed", "error", err)
+			golog.Fatal("lldb failed", "module", logModule, "udid", device.Properties.SerialNumber, "port", port, "error", err)
 		} else {
 			// exit without error
 			os.Exit(0)
@@ -209,7 +211,7 @@ func Start(device ios.DeviceEntry, appPath string, stopAtEntry bool) error {
 	for {
 		localConn, err := listener.Accept()
 		if err != nil {
-			golog.Error("accept failed", "error", err)
+			golog.Error("accept failed", "module", logModule, "udid", device.Properties.SerialNumber, "port", port, "error", err)
 			continue
 		}
 		go func() {

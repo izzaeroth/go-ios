@@ -10,6 +10,8 @@ import (
 	"github.com/danielpaulus/go-ios/ios/golog"
 )
 
+const logModule = "go-ios/crashreport"
+
 const (
 	crashReportMoverService      = "com.apple.crashreportmover"
 	crashReportCopyMobileService = "com.apple.crashreportcopymobile"
@@ -47,7 +49,7 @@ func RemoveReports(device ios.DeviceEntry, cwd string, pattern string) error {
 	if pattern == "" {
 		return fmt.Errorf("empty pattern not ok, just use *")
 	}
-	golog.Info("deleting", "cwd", cwd, "pattern", pattern)
+	golog.Info("deleting", "module", logModule, "udid", device.Properties.SerialNumber, "cwd", cwd, "pattern", pattern)
 	err := moveReports(device)
 	if err != nil {
 		return err
@@ -97,12 +99,12 @@ func ListReports(device ios.DeviceEntry, pattern string) ([]string, error) {
 }
 
 func moveReports(device ios.DeviceEntry) error {
-	golog.Debug("moving crashreports")
+	golog.Debug("moving crashreports", "module", logModule, "udid", device.Properties.SerialNumber)
 	conn, err := newMover(device)
 	if err != nil {
 		return err
 	}
-	golog.Debug("connected to mover, awaiting ping")
+	golog.Debug("connected to mover, awaiting ping", "module", logModule, "udid", device.Properties.SerialNumber)
 	ping := make([]byte, 4)
 	_, err = conn.deviceConn.Reader().Read(ping)
 	if err != nil {
@@ -111,7 +113,7 @@ func moveReports(device ios.DeviceEntry) error {
 	if "ping" != string(ping) {
 		return fmt.Errorf("did not receive ping from crashreport mover: %x", ping)
 	}
-	golog.Debug("ping received")
+	golog.Debug("ping received", "module", logModule, "udid", device.Properties.SerialNumber)
 	return nil
 }
 

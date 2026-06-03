@@ -14,6 +14,8 @@ import (
 	"howett.net/plist"
 )
 
+const logModule = "go-ios/pcap"
+
 var (
 	// IOSPacketHeader default is -1
 	Pid              = int32(-2)
@@ -70,7 +72,7 @@ func Start(device ios.DeviceEntry) error {
 		return err
 	}
 	defer f.Close()
-	golog.Info("create pcap file", "path", fname)
+	golog.Info("create pcap file", "module", logModule, "udid", device.Properties.SerialNumber, "path", fname)
 	for {
 		b, err := plistCodec.Decode(intf.Reader())
 		if err != nil {

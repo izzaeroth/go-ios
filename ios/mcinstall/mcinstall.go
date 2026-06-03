@@ -11,6 +11,8 @@ import (
 	"github.com/danielpaulus/go-ios/ios/golog"
 )
 
+const logModule = "go-ios/mcinstall"
+
 const serviceName string = "com.apple.mobile.MCInstall"
 
 type Connection struct {
@@ -298,7 +300,7 @@ func (mcInstallConn *Connection) addProfile(profilePlist []byte, installcmd stri
 	if checkStatus(plist) {
 		return nil
 	}
-	golog.Error("received add response", "response", plist)
+	golog.Error("received add response", "module", logModule, "installcmd", installcmd, "response", plist)
 	return fmt.Errorf("add failed")
 }
 
@@ -320,7 +322,7 @@ func (mcInstallConn *Connection) RemoveProfile(identifier string) error {
 	if checkStatus(plist) {
 		return nil
 	}
-	golog.Error("received remove response", "response", plist)
+	golog.Error("received remove response", "module", logModule, "identifier", identifier, "response", plist)
 	return fmt.Errorf("remove failed")
 }
 

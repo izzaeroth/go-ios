@@ -124,11 +124,11 @@ func (conn Connection) sendDirectory(dir string) error {
 	if err != nil {
 		return err
 	}
-	golog.Debug("created tempdir", "path", tmpDir)
+	golog.Debug("created tempdir", "module", logModule, "dir", dir, "path", tmpDir)
 	defer func() {
 		err := os.RemoveAll(tmpDir)
 		if err != nil {
-			golog.Warn("failed removing tempdir", "dir", tmpDir)
+			golog.Warn("failed removing tempdir", "module", logModule, "dir", tmpDir)
 		}
 	}()
 	var totalBytes int64
@@ -152,7 +152,7 @@ func (conn Connection) sendDirectory(dir string) error {
 	}
 
 	init := newInitTransfer(dir + ".ipa")
-	golog.Debug("sending inittransfer", "init", init)
+	golog.Debug("sending inittransfer", "module", logModule, "dir", dir, "init", init)
 	err = conn.plistCodec.Write(init)
 	if err != nil {
 		return err
@@ -160,7 +160,7 @@ func (conn Connection) sendDirectory(dir string) error {
 
 	hasher := crc32.NewIEEE()
 
-	golog.Debug("writing meta inf")
+	golog.Debug("writing meta inf", "module", logModule, "dir", dir)
 	err = addFileToZip(conn.deviceConn, metainfFolder, tmpDir, hasher)
 	if err != nil {
 		return err
@@ -169,9 +169,9 @@ func (conn Connection) sendDirectory(dir string) error {
 	if err != nil {
 		return err
 	}
-	golog.Debug("meta inf send successfully")
+	golog.Debug("meta inf send successfully", "module", logModule, "dir", dir)
 
-	golog.Debug("sending files....")
+	golog.Debug("sending files....", "module", logModule, "dir", dir)
 
 	for _, file := range unzippedFiles {
 		err := addFileToZip(conn.deviceConn, file, dir, hasher)
@@ -179,7 +179,7 @@ func (conn Connection) sendDirectory(dir string) error {
 			return err
 		}
 	}
-	golog.Debug("files sent, sending central header....")
+	golog.Debug("files sent, sending central header....", "module", logModule, "dir", dir)
 	_, err = conn.deviceConn.Write(centralDirectoryHeader)
 	if err != nil {
 		return err
@@ -198,7 +198,7 @@ func (conn Connection) sendIpaFile(ipaFile string) error {
 	totalBytes, numFiles := zipFilesSize(ipa)
 
 	init := newInitTransfer(ipaFile)
-	golog.Debug("sending inittransfer", "init", init)
+	golog.Debug("sending inittransfer", "module", logModule, "ipaFile", ipaFile, "init", init)
 	err = conn.plistCodec.Write(init)
 	if err != nil {
 		return err
@@ -243,7 +243,7 @@ func (conn Connection) sendIpaFile(ipaFile string) error {
 		}
 	}
 
-	golog.Debug("files sent, sending central header....")
+	golog.Debug("files sent, sending central header....", "module", logModule, "ipaFile", ipaFile)
 	_, err = conn.deviceConn.Write(centralDirectoryHeader)
 	if err != nil {
 		return err
@@ -259,16 +259,16 @@ func (conn Connection) waitForInstallation() error {
 		if err != nil {
 			return err
 		}
-		golog.Debug("received progress plist", "plist", plist)
+		golog.Debug("received progress plist", "module", logModule, "plist", plist)
 		done, percent, status, err := evaluateProgress(plist)
 		if err != nil {
 			return err
 		}
 		if done {
-			golog.Info("installation successful")
+			golog.Info("installation successful", "module", logModule)
 			return nil
 		}
-		golog.Info("installing", "status", status, "percentComplete", percent)
+		golog.Info("installing", "module", logModule, "status", status, "percentComplete", percent)
 	}
 }
 

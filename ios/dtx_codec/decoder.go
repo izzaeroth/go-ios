@@ -215,9 +215,9 @@ func (d Message) parsePayloadBytes(messageBytes []byte) ([]interface{}, error) {
 	if d.PayloadHeader.MessageType == LZ4CompressedMessage {
 		uncompressed, err := Decompress(messageBytes[offset:])
 		if err == nil {
-			golog.Info("lz4 decompressed message", "compressed", len(messageBytes[offset:]), "uncompressed", len(uncompressed))
+			golog.Info("lz4 decompressed message", "module", logModule, "compressed", len(messageBytes[offset:]), "uncompressed", len(uncompressed))
 		} else {
-			golog.Info("skipping lz4 compressed msg", "bytes", len(messageBytes[offset:]), "error", err)
+			golog.Info("skipping lz4 compressed msg", "module", logModule, "bytes", len(messageBytes[offset:]), "error", err)
 		}
 		return []interface{}{messageBytes[offset:]}, nil
 	}

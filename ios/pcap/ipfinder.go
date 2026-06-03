@@ -70,23 +70,23 @@ func findIP(p []byte, info *NetworkInfo) error {
 		tcp, _ := tcpLayer.(*layers.Ethernet)
 		if tcp.SrcMAC.String() == info.Mac {
 			if golog.Enabled(slog.LevelDebug) {
-				golog.Debug("found packet for mac", "mac", info.Mac)
+				golog.Debug("found packet for mac", "module", logModule, "mac", info.Mac)
 				for _, layer := range packet.Layers() {
-					golog.Debug("layer", "layer", layer.LayerType().String())
+					golog.Debug("layer", "module", logModule, "mac", info.Mac, "layer", layer.LayerType().String())
 				}
 			}
 			if ipv4Layer := packet.Layer(layers.LayerTypeIPv4); ipv4Layer != nil {
 				ipv4, ok := ipv4Layer.(*layers.IPv4)
 				if ok {
 					info.IPv4 = ipv4.SrcIP.String()
-					golog.Debug("ip4 found", "ip", info.IPv4)
+					golog.Debug("ip4 found", "module", logModule, "mac", info.Mac, "ip", info.IPv4)
 				}
 			}
 			if ipv6Layer := packet.Layer(layers.LayerTypeIPv6); ipv6Layer != nil {
 				ipv6, ok := ipv6Layer.(*layers.IPv6)
 				if ok {
 					info.IPv6 = ipv6.SrcIP.String()
-					golog.Debug("ip6 found", "ip", info.IPv6)
+					golog.Debug("ip6 found", "module", logModule, "mac", info.Mac, "ip", info.IPv6)
 				}
 			}
 		}

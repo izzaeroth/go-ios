@@ -9,6 +9,8 @@ import (
 	"howett.net/plist"
 )
 
+const logModule = "go-ios/installationproxy"
+
 const serviceName = "com.apple.mobile.installation_proxy"
 
 const (
@@ -137,10 +139,10 @@ func checkFinished(dict map[string]interface{}) (bool, error) {
 	}
 	if val, ok := dict["Status"]; ok {
 		if "Complete" == val {
-			golog.Info("done uninstalling")
+			golog.Info("done uninstalling", "module", logModule)
 			return true, nil
 		}
-		golog.Info("uninstall status", "status", val)
+		golog.Info("uninstall status", "module", logModule, "status", val)
 		return false, nil
 	}
 	return true, fmt.Errorf("unknown status update: %+v", dict)

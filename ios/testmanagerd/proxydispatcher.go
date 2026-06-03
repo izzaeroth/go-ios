@@ -33,7 +33,7 @@ func (p proxyDispatcher) Dispatch(m dtx.Message) {
 		method := m.Payload[0].(string)
 
 		if !strings.Contains(method, "logDebugMessage") {
-			golog.Debug("method received", "method", method)
+			golog.Debug("method received", "module", logModule, "id", p.id, "method", method)
 		}
 
 		switch method {
@@ -42,7 +42,7 @@ func (p proxyDispatcher) Dispatch(m dtx.Message) {
 			return
 		case "_XCT_testRunnerReadyWithCapabilities:":
 			shouldAck = false
-			golog.Debug("received testRunnerReadyWithCapabilities")
+			golog.Debug("received testRunnerReadyWithCapabilities", "module", logModule, "id", p.id)
 			resp, _ := p.testRunnerReadyWithCapabilities(m)
 			payload, _ := nskeyedarchiver.ArchiveBin(resp)
 			messageBytes, decoderErr := dtx.Encode(m.Identifier, 1, m.ChannelCode, false, dtx.ResponseWithReturnValueInPayload, payload, dtx.NewPrimitiveDictionary())
@@ -50,12 +50,12 @@ func (p proxyDispatcher) Dispatch(m dtx.Message) {
 				break
 			}
 
-			golog.Debug("sending response for capabs")
+			golog.Debug("sending response for capabs", "module", logModule, "id", p.id)
 			p.dtxConnection.Send(messageBytes)
 		case "_XCT_didBeginExecutingTestPlan":
-			golog.Debug("_XCT_didBeginExecutingTestPlan received. Executing test.")
+			golog.Debug("_XCT_didBeginExecutingTestPlan received. Executing test.", "module", logModule, "id", p.id)
 		case "_XCT_didFinishExecutingTestPlan":
-			golog.Debug("_XCT_didFinishExecutingTestPlan received. Closing test.")
+			golog.Debug("_XCT_didFinishExecutingTestPlan received. Closing test.", "module", logModule, "id", p.id)
 
 			p.testListener.didFinishExecutingTestPlan()
 		case "_XCT_initializationForUITestingDidFailWithError:":
@@ -109,9 +109,9 @@ func (p proxyDispatcher) Dispatch(m dtx.Message) {
 
 			p.testListener.LogMessage(data[0].(string))
 		case "_XCT_didBeginInitializingForUITesting":
-			golog.Debug("_XCT_didBeginInitializingForUITesting received. ")
+			golog.Debug("_XCT_didBeginInitializingForUITesting received. ", "module", logModule, "id", p.id)
 		case "_XCT_getProgressForLaunch:":
-			golog.Debug("_XCT_getProgressForLaunch received. ")
+			golog.Debug("_XCT_getProgressForLaunch received. ", "module", logModule, "id", p.id)
 		case "_XCT_testCase:method:didFinishActivity:":
 			argumentLengthErr := assertArgumentsLengthEqual(m, 3)
 			if argumentLengthErr != nil {
@@ -176,9 +176,9 @@ func (p proxyDispatcher) Dispatch(m dtx.Message) {
 
 			p.testListener.testCaseStalled(testCase, testMethod, file, line)
 		case "_XCT_testCase:method:willStartActivity:":
-			golog.Debug("_XCT_testCase:method:willStartActivity: received.")
+			golog.Debug("_XCT_testCase:method:willStartActivity: received.", "module", logModule, "id", p.id)
 		case "_XCT_testCaseWithIdentifier:willStartActivity:":
-			golog.Debug("_XCT_testCaseWithIdentifier:willStartActivity: received.")
+			golog.Debug("_XCT_testCaseWithIdentifier:willStartActivity: received.", "module", logModule, "id", p.id)
 		case "_XCT_testCaseDidFailForTestClass:method:withMessage:file:line:":
 			argumentLengthErr := assertArgumentsLengthEqual(m, 5)
 			if argumentLengthErr != nil {
@@ -328,7 +328,7 @@ func (p proxyDispatcher) Dispatch(m dtx.Message) {
 
 			p.testListener.testCaseDidStartForClass(testIdentifier.C[0], testIdentifier.C[1])
 		case "_XCT_testMethod:ofClass:didMeasureMetric:file:line:":
-			golog.Debug("_XCT_testMethod:ofClass:didMeasureMetric:file:line: received.")
+			golog.Debug("_XCT_testMethod:ofClass:didMeasureMetric:file:line: received.", "module", logModule, "id", p.id)
 		case "_XCT_testSuite:didFinishAt:runCount:withFailures:unexpected:testDuration:totalDuration:":
 			argumentLengthErr := assertArgumentsLengthEqual(m, 7)
 			if argumentLengthErr != nil {
@@ -472,7 +472,7 @@ func (p proxyDispatcher) Dispatch(m dtx.Message) {
 				p.testListener.testSuiteDidStart(testIdentifier.C[0], date)
 			}
 		default:
-			golog.Info("device called local method", "sel", method)
+			golog.Info("device called local method", "module", logModule, "id", p.id, "sel", method)
 		}
 	}
 
@@ -484,7 +484,7 @@ func (p proxyDispatcher) Dispatch(m dtx.Message) {
 		dtx.SendAckIfNeeded(p.dtxConnection, m)
 	}
 
-	golog.Trace("dispatcher received message", "message", m.String())
+	golog.Trace("dispatcher received message", "module", logModule, "id", p.id, "message", m.String())
 }
 
 func assertArgumentsLengthEqual(m dtx.Message, expectedLength uint) error {

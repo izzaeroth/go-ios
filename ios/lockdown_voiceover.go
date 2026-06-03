@@ -18,7 +18,7 @@ func SetVoiceOver(device DeviceEntry, enabled bool) error {
 	if err != nil {
 		return err
 	}
-	golog.Debug("setting lockdown value", "key", voiceOverTouchKey, "enabled", enabled)
+	golog.Debug("setting lockdown value", "module", logModule, "udid", device.Properties.SerialNumber, "key", voiceOverTouchKey, "enabled", enabled)
 	defer lockDownConn.Close()
 	err = lockDownConn.SetValueForDomain(voiceOverTouchKey, accessibilityDomain, enabled)
 	return err

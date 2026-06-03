@@ -101,14 +101,14 @@ func (s *sysmontapService) ReceiveCPUUsage() chan SysmontapMessage {
 		for msg := range s.msgDispatcher.messages {
 			sysmontapMessage, err := mapToCPUUsage(msg)
 			if err != nil {
-				golog.Debug("expected `sysmontapMessage` from global channel, but received different message", "message", msg)
+				golog.Debug("expected `sysmontapMessage` from global channel, but received different message", "module", logModule, "message", msg)
 				continue
 			}
 
 			messages <- sysmontapMessage
 		}
 
-		golog.Info("sysmontap message dispatcher channel closed")
+		golog.Info("sysmontap message dispatcher channel closed", "module", logModule)
 	}()
 
 	return messages

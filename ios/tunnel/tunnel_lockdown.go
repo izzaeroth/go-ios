@@ -23,7 +23,7 @@ func ConnectTunnelLockdown(device ios.DeviceEntry) (Tunnel, error) {
 }
 
 func connectToTunnelLockdown(ctx context.Context, device ios.DeviceEntry, connToDevice io.ReadWriteCloser) (Tunnel, error) {
-	golog.Info("connect to lockdown tunnel endpoint on device")
+	golog.Info("connect to lockdown tunnel endpoint on device", "module", logModule, "udid", device.Properties.SerialNumber)
 
 	tunnelInfo, err := exchangeCoreTunnelParameters(connToDevice)
 	if err != nil {
@@ -42,14 +42,14 @@ func connectToTunnelLockdown(ctx context.Context, device ios.DeviceEntry, connTo
 	go func() {
 		err := forwardTCPToInterface(tunnelCtx, tunnelInfo.ClientParameters.Mtu, connToDevice, utunIface)
 		if err != nil {
-			golog.Error("failed to forward data to tunnel interface", "error", err)
+			golog.Error("failed to forward data to tunnel interface", "module", logModule, "udid", device.Properties.SerialNumber, "error", err)
 		}
 	}()
 
 	go func() {
 		err := forwardTUNToDevice(tunnelCtx, tunnelInfo.ClientParameters.Mtu, utunIface, connToDevice)
 		if err != nil {
-			golog.Error("failed to forward data to the device", "error", err)
+			golog.Error("failed to forward data to the device", "module", logModule, "udid", device.Properties.SerialNumber, "error", err)
 		}
 	}()
 

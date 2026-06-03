@@ -91,7 +91,7 @@ func (iface *UserSpaceTUNInterface) TunnelRWCThroughInterface(localPort uint16, 
 		return fmt.Errorf("TunnelRWCThroughInterface: Connect to remote failed: %+v", err)
 	}
 
-	golog.Info("Connected to remote", "remoteAddr", remoteAddr, "remotePort", remotePort)
+	golog.Info("Connected to remote", "module", logModule, "remoteAddr", remoteAddr, "remotePort", remotePort)
 	remoteConn := gonet.NewTCPConn(&wq, ep)
 	defer remoteConn.Close()
 	perr := proxyConns(rw, remoteConn)
@@ -188,7 +188,7 @@ func ConnectUserSpaceTunnelLockdown(device ios.DeviceEntry, ifacePort int) (Tunn
 }
 
 func connectToUserspaceTunnelLockdown(ctx context.Context, device ios.DeviceEntry, connToDevice io.ReadWriteCloser, ifacePort int) (Tunnel, error) {
-	golog.Info("connect to lockdown tunnel endpoint on device")
+	golog.Info("connect to lockdown tunnel endpoint on device", "module", logModule, "udid", device.Properties.SerialNumber, "ifacePort", ifacePort)
 	tunnelInfo, err := exchangeCoreTunnelParameters(connToDevice)
 	if err != nil {
 		return Tunnel{}, fmt.Errorf("could not exchange tunnel parameters. %w", err)
@@ -222,7 +222,7 @@ func connectToUserspaceTunnelLockdown(ctx context.Context, device ios.DeviceEntr
 
 func listenToConns(iface UserSpaceTUNInterface, listener net.Listener) error {
 	defer func() {
-		golog.Info("Stopped listening for connections")
+		golog.Info("Stopped listening for connections", "module", logModule)
 	}()
 
 	for {
@@ -230,7 +230,7 @@ func listenToConns(iface UserSpaceTUNInterface, listener net.Listener) error {
 		if err != nil {
 			return err
 		}
-		golog.Info("Received connection request", "from", client.RemoteAddr(), "to", client.LocalAddr())
+		golog.Info("Received connection request", "module", logModule, "from", client.RemoteAddr(), "to", client.LocalAddr())
 		remoteAddrBytes := make([]byte, 16)
 		_, err = client.Read(remoteAddrBytes)
 		if err != nil {
@@ -240,7 +240,7 @@ func listenToConns(iface UserSpaceTUNInterface, listener net.Listener) error {
 		remotePortBytes := make([]byte, 4)
 		_, err = client.Read(remotePortBytes)
 		port := binary.LittleEndian.Uint32(remotePortBytes)
-		golog.Info("Received connection request to device", "ip", net.IP(remoteAddrBytes), "port", port)
+		golog.Info("Received connection request to device", "module", logModule, "ip", net.IP(remoteAddrBytes), "port", port)
 		go iface.TunnelRWCThroughInterface(0, net.IP(remoteAddrBytes), uint16(port), client)
 	}
 }

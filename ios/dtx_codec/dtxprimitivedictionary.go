@@ -121,7 +121,7 @@ func (d PrimitiveDictionary) String() string {
 				jsonBytes, _ := json.Marshal(msg[0])
 				prettyString = string(jsonBytes)
 			} else {
-				golog.Warn("failed decoding", "error", err)
+				golog.Warn("failed decoding", "module", logModule, "error", err)
 			}
 			result += fmt.Sprintf("{t:%s, v:%s},", toString(v), prettyString)
 			continue
@@ -145,17 +145,17 @@ func DecodeAuxiliary(auxBytes []byte) PrimitiveDictionary {
 	for len(auxBytes) >= 4 {
 		keyType, key, remainingBytes, err := readEntry(auxBytes)
 		if err != nil {
-			golog.Warn("DecodeAuxiliary: error reading key entry", "error", err)
+			golog.Warn("DecodeAuxiliary: error reading key entry", "module", logModule, "error", err)
 			break
 		}
 		auxBytes = remainingBytes
 		if len(auxBytes) < 4 {
-			golog.Warn("DecodeAuxiliary: insufficient bytes for value entry")
+			golog.Warn("DecodeAuxiliary: insufficient bytes for value entry", "module", logModule)
 			break
 		}
 		valueType, value, remainingBytes, err := readEntry(auxBytes)
 		if err != nil {
-			golog.Warn("DecodeAuxiliary: error reading value entry", "error", err)
+			golog.Warn("DecodeAuxiliary: error reading value entry", "module", logModule, "error", err)
 			break
 		}
 		auxBytes = remainingBytes

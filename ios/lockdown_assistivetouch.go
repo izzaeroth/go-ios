@@ -21,7 +21,7 @@ func SetAssistiveTouch(device DeviceEntry, enabled bool) error {
 	if err != nil {
 		return err
 	}
-	golog.Debug("setting lockdown value", "key", assistiveTouchKey, "enabled", enabled)
+	golog.Debug("setting lockdown value", "module", logModule, "udid", device.Properties.SerialNumber, "key", assistiveTouchKey, "enabled", enabled)
 	defer lockDownConn.Close()
 	err = lockDownConn.SetValueForDomain(assistiveTouchKey, accessibilityDomain, enabled)
 	return err
