@@ -2795,7 +2795,6 @@ type detailsEntry struct {
 	ConnectionType string
 }
 
-
 func outputDetailedList(deviceList ios.DeviceList) {
 	result := make([]detailsEntry, len(deviceList.DeviceList))
 	for i, device := range deviceList.DeviceList {
