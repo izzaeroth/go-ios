@@ -44,6 +44,37 @@ func TestTranslateCDPCommand(t *testing.T) {
 	}
 }
 
+func TestTranslateDebuggerBreakpointCondition(t *testing.T) {
+	message := translateCDPCommand(map[string]any{
+		"id":     2,
+		"method": "Debugger.setBreakpointByUrl",
+		"params": map[string]any{"condition": "x > 1"},
+	})
+	params := message["params"].(map[string]any)
+	options := params["options"].(map[string]any)
+	if options["condition"] != "x > 1" {
+		t.Fatalf("unexpected options: %#v", options)
+	}
+	if _, ok := params["condition"]; ok {
+		t.Fatalf("condition should be moved into options: %#v", params)
+	}
+}
+
+func TestTranslateRuntimeCompileScript(t *testing.T) {
+	message := translateCDPCommand(map[string]any{
+		"id":     3,
+		"method": "Runtime.compileScript",
+		"params": map[string]any{"expression": "let x = 1"},
+	})
+	if message["method"] != "Runtime.parse" {
+		t.Fatalf("unexpected method: %#v", message["method"])
+	}
+	params := message["params"].(map[string]any)
+	if params["source"] != "let x = 1" {
+		t.Fatalf("unexpected params: %#v", params)
+	}
+}
+
 func TestNormalizeConsoleEvent(t *testing.T) {
 	normalized, drop := normalizeCDPEvent(map[string]any{
 		"method": "Console.messageAdded",
@@ -60,5 +91,26 @@ func TestNormalizeConsoleEvent(t *testing.T) {
 	}
 	if normalized["method"] != "Log.entryAdded" {
 		t.Fatalf("unexpected normalized method: %#v", normalized)
+	}
+}
+
+func TestNormalizeDebuggerPaused(t *testing.T) {
+	normalized, drop := normalizeCDPEvent(map[string]any{
+		"method": "Debugger.paused",
+		"params": map[string]any{
+			"reason": "Listener",
+			"data":   map[string]any{"breakpointId": "bp-1"},
+		},
+	})
+	if drop {
+		t.Fatal("expected debugger paused event to be emitted")
+	}
+	params := normalized["params"].(map[string]any)
+	if params["reason"] != "EventListener" {
+		t.Fatalf("unexpected reason: %#v", params["reason"])
+	}
+	breakpoints := params["hitBreakpoints"].([]string)
+	if breakpoints[0] != "bp-1" {
+		t.Fatalf("unexpected hit breakpoints: %#v", breakpoints)
 	}
 }

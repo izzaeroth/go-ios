@@ -2,6 +2,7 @@ package webinspector
 
 import (
 	"context"
+	"crypto/sha1"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -267,8 +268,11 @@ func localCDPResponse(message map[string]any, targetID string, sessionID string,
 		})
 	case "Target.setDiscoverTargets",
 		"Target.setRemoteLocations",
+		"CSS.trackComputedStyleUpdates",
 		"DOM.enable",
 		"DOMDebugger.setBreakOnCSPViolation",
+		"Debugger.setAsyncCallStackDepth",
+		"Debugger.setBlackboxPatterns",
 		"Emulation.setTouchEmulationEnabled",
 		"Emulation.setFocusEmulationEnabled",
 		"Emulation.setEmulatedVisionDeficiency",
@@ -294,6 +298,9 @@ func localCDPResponse(message map[string]any, targetID string, sessionID string,
 		"Page.stopScreencast",
 		"Profiler.enable",
 		"Runtime.runIfWaitingForDebugger":
+		if method == "Debugger.setAsyncCallStackDepth" {
+			result["result"] = true
+		}
 	case "CSS.takeComputedStyleUpdates":
 		result["nodeIds"] = []int{}
 	case "Network.loadNetworkResource":
@@ -353,6 +360,23 @@ func translateCDPCommand(message map[string]any) map[string]any {
 				params["selector"] = strings.Split(rule, "{")[0]
 			}
 		}
+	case "Debugger.setBreakpointByUrl":
+		if params != nil {
+			if condition, ok := params["condition"]; ok {
+				options, _ := params["options"].(map[string]any)
+				if options == nil {
+					options = map[string]any{}
+				}
+				options["condition"] = condition
+				params["options"] = options
+				delete(params, "condition")
+			}
+		}
+	case "Runtime.compileScript":
+		message["method"] = "Runtime.parse"
+		if params != nil {
+			message["params"] = map[string]any{"source": params["expression"]}
+		}
 	}
 	return message
 }
@@ -373,6 +397,31 @@ func normalizeCDPEvent(message map[string]any) (map[string]any, bool) {
 		return message, true
 	case "Debugger.globalObjectCleared":
 		return map[string]any{"method": "DOM.documentUpdated"}, false
+	case "Debugger.paused":
+		if reason := stringValue(params["reason"]); reason != "" {
+			params["reason"] = debuggerPausedReason(reason)
+		}
+		if data, _ := params["data"].(map[string]any); data != nil {
+			if breakpointID := stringValue(data["breakpointId"]); breakpointID != "" {
+				params["hitBreakpoints"] = []string{breakpointID}
+			}
+		}
+	case "Debugger.scriptFailedToParse":
+		source := stringValue(params["scriptSource"])
+		contextID := params["executionContextId"]
+		if contextID == nil {
+			contextID = 0
+		}
+		params["endColumn"] = 0
+		params["endLine"] = params["errorLine"]
+		params["executionContextId"] = contextID
+		params["startColumn"] = 0
+		params["startLine"] = params["startLine"]
+		sourceHash := fmt.Sprintf("%x", sha1.Sum([]byte(source)))
+		params["scriptId"] = sourceHash
+		params["hash"] = sourceHash
+		delete(params, "errorLine")
+		delete(params, "scriptSource")
 	case "Runtime.executionContextCreated":
 		if contextMap, ok := params["context"].(map[string]any); ok {
 			params["context"] = map[string]any{
@@ -445,6 +494,10 @@ func logSource(source string) string {
 		return source
 	case "console-api":
 		return "javascript"
+	case "css":
+		return "rendering"
+	case "content-blocker", "media", "mediasource", "webrtc", "itp-debug", "ad-click-attribution":
+		return "other"
 	default:
 		return "other"
 	}
@@ -471,6 +524,29 @@ func validNetworkResourceType(resourceType string) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func debuggerPausedReason(reason string) string {
+	switch reason {
+	case "XHR":
+		return "XHR"
+	case "DOM":
+		return "DOM"
+	case "Listener":
+		return "EventListener"
+	case "exception":
+		return "exception"
+	case "assert":
+		return "assert"
+	case "CSPViolation":
+		return "CSPViolation"
+	case "DebuggerStatement":
+		return "debugCommand"
+	case "Breakpoint", "PauseOnNextStatement":
+		return "instrumentation"
+	default:
+		return "other"
 	}
 }
 

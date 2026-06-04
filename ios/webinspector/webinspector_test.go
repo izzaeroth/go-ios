@@ -1,6 +1,9 @@
 package webinspector
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseApplication(t *testing.T) {
 	app, err := parseApplication(map[string]any{
@@ -67,5 +70,28 @@ func TestParseEvaluateResult(t *testing.T) {
 	}
 	if value != "hello" {
 		t.Fatalf("expected hello, got %#v", value)
+	}
+}
+
+func TestParseEvaluateResultObjectPreview(t *testing.T) {
+	value, err := parseEvaluateResult(map[string]any{
+		"result": map[string]any{
+			"result": map[string]any{
+				"type":      "object",
+				"className": "Object",
+				"preview": map[string]any{
+					"properties": []any{
+						map[string]any{"name": "answer", "value": "42", "type": "number"},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("parse evaluate result: %v", err)
+	}
+	text, _ := value.(string)
+	if !strings.Contains(text, "answer: 42") {
+		t.Fatalf("expected object preview, got %#v", value)
 	}
 }

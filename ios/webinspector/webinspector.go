@@ -668,10 +668,45 @@ func parseEvaluateResult(message map[string]any) (any, error) {
 	if value, ok := remote["value"]; ok {
 		return value, nil
 	}
+	if remote["type"] == "object" {
+		if preview, ok := remote["preview"].(map[string]any); ok {
+			return formatObjectPreview(stringValue(remote["className"]), preview), nil
+		}
+	}
 	if description, ok := remote["description"].(string); ok {
 		return description, nil
 	}
 	return nil, nil
+}
+
+func formatObjectPreview(className string, preview map[string]any) string {
+	if className == "" {
+		className = "Object"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "[object %s]\n{", className)
+	properties, _ := preview["properties"].([]any)
+	for _, rawProperty := range properties {
+		property, _ := rawProperty.(map[string]any)
+		name := stringValue(property["name"])
+		if name == "" {
+			continue
+		}
+		value := stringValue(property["value"])
+		if value == "" {
+			value = "NOT_SUPPORTED_FOR_PREVIEW"
+		}
+		propertyType := stringValue(property["type"])
+		fmt.Fprintf(&b, "\n\t%s: %s", name, value)
+		if propertyType != "" {
+			fmt.Fprintf(&b, ", // %s", propertyType)
+		}
+	}
+	if boolValue(preview["overflow"]) {
+		b.WriteString("\n\t// ...")
+	}
+	b.WriteString("\n}")
+	return b.String()
 }
 
 func mustMarshalString(value any) string {
