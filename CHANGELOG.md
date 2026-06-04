@@ -13,6 +13,48 @@ Use `## [Unreleased]` to jot down notable changes between releases if you like.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-06-04
+
+## What's new
+
+### Performance instrumentation (#365, @kissfu)
+New `instruments`-backed services for live device telemetry: **network statistics**, **battery**, **`sysmontap`** system monitoring, and **FPS / OpenGL graphics** metrics. Useful for profiling app performance and resource usage directly from the CLI/library, with configurable network timeouts.
+
+### Wallpaper & icon layout (#714, @aluedeke)
+New `wallpaper` and `icon-layout` commands to read the device's home-screen wallpaper and springboard icon arrangement.
+
+### Wi-Fi profile management (#692, @gbalduzzi)
+Add and remove Wi-Fi connection profiles on a device. Inputs are validated up front, and the command clearly reports when the device must be **supervised** for the operation to succeed rather than failing obscurely.
+
+### Device shutdown (#693, @gbalduzzi)
+New support for shutting a device down programmatically.
+
+### `ConnectionType` in device details (#698, @Harrilee)
+`ios list` now reports each device's `ConnectionType` (**USB** or **Network**), so devices reachable over the network are distinguishable from USB-attached ones. Covered by the e2e device suite.
+
+### Configurable tunnel-info API host (#737, @aluedeke)
+The tunnel-info HTTP API's bind host is now configurable instead of being hard-coded, making it easier to run the tunnel daemon in containerized or remote setups.
+
+### REST API: `resetaccessibility` endpoint (#637, @iSevenDays)
+New endpoint to reset a device's iOS accessibility settings (including font size and related options) back to defaults.
+
+## Improvements & fixes
+
+### More robust usbmuxd socket resolution (#577, @Ylarod)
+`GetUsbmuxdSocket` / `USBMUXD_SOCKET_ADDRESS` handling was rewritten: an explicit scheme (`unix://`, `tcp://`) is honored as-is (and case-insensitively), a bare `host:port` is treated as TCP, and a bare path is treated as a unix socket — without the previous panic on unscheme'd `host:port` values.
+
+### Pluggable logging — logrus → slog (#736, @danielpaulus)
+go-ios no longer depends on **logrus**. All library logging now flows through a thin `ios/golog` slog seam with consistent, filterable attributes (`module`, `udid`, and instance identifiers). Library embedders can route go-ios's logs into their own handler with `ios.SetLogger(*slog.Logger)`; if you do nothing, standard `slog.Default()` behavior applies.
+
+> ⚠️ **Embedder-facing change:** the logrus dependency has been removed and `debugproxy`'s logger-typed signatures changed accordingly. CLI users are unaffected.
+
+## Internal
+- Removed legacy device integration tests now superseded by the gated `e2e` suite (#735, @danielpaulus)
+- Added a contributor `AGENTS.md` documenting build/test, real-device CI, the logging convention, and the dispatch-only release process (#734, @danielpaulus)
+- CI fixes for changelog insertion and npm-propagation wait during publish verification (#733, @danielpaulus)
+
+Thanks to everyone who contributed to this release: @kissfu, @aluedeke, @gbalduzzi, @Harrilee, @iSevenDays, and @Ylarod. 🎉
+
 ## [1.0.218] - 2026-06-03
 
 ### ✨ New features & improvements
