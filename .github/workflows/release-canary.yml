@@ -14,10 +14,10 @@ jobs:
   build_on_windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Install Go
-        uses: actions/setup-go@v3
+        uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
@@ -41,10 +41,10 @@ jobs:
     runs-on: macos-latest
     needs: build_on_windows
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Install Go
-        uses: actions/setup-go@v3
+        uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
@@ -75,10 +75,10 @@ jobs:
       # publishing. No contents: write here — canary does not cut a GitHub release.
       id-token: write
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Install Go
-        uses: actions/setup-go@v3
+        uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true

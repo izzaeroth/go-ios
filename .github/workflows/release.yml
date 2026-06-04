@@ -38,7 +38,7 @@ jobs:
     outputs:
       version: ${{ steps.compute.outputs.version }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 0 # need all tags to find the latest
@@ -63,10 +63,10 @@ jobs:
     runs-on: windows-latest
     needs: prepare_version
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Install Go
-        uses: actions/setup-go@v3
+        uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
@@ -90,10 +90,10 @@ jobs:
     runs-on: macos-latest
     needs: [prepare_version, build_on_windows]
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Install Go
-        uses: actions/setup-go@v3
+        uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
@@ -125,14 +125,14 @@ jobs:
     env:
       VERSION: ${{ needs.prepare_version.outputs.version }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 0
           token: ${{ secrets.RELEASE_PAT }} # admin token, can push to protected main
 
       - name: Install Go
-        uses: actions/setup-go@v3
+        uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
