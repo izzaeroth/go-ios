@@ -178,7 +178,7 @@ func (s *CDPServer) forwardBrowserCommands(ctx context.Context, ws *websocket.Co
 		}
 		id, _ := numericInt(message["id"])
 
-		if handled, response, extra := localCDPResponse(message, targetID, sessionID); handled {
+		if handled, response, extra := localCDPResponse(message, targetID, sessionID, page); handled {
 			if err := ws.WriteJSON(response); err != nil {
 				return err
 			}
@@ -218,7 +218,9 @@ func waitForTargetID(ctx context.Context, client *Client, ws *websocket.Conn) st
 			continue
 		}
 		targetID, _ := targetInfo["targetId"].(string)
-		_ = ws.WriteJSON(event)
+		if normalized, drop := normalizeCDPEvent(event); !drop {
+			_ = ws.WriteJSON(normalized)
+		}
 		return targetID
 	}
 }
@@ -242,23 +244,7 @@ func unwrapDispatchMessage(event map[string]any) (map[string]any, bool) {
 	return decoded, true
 }
 
-func shouldReplyLocally(method string) bool {
-	switch method {
-	case "Target.setDiscoverTargets",
-		"Target.setAutoAttach",
-		"Target.setRemoteLocations",
-		"DOM.enable",
-		"Log.enable",
-		"Network.enable",
-		"Page.enable",
-		"Runtime.enable":
-		return true
-	default:
-		return false
-	}
-}
-
-func localCDPResponse(message map[string]any, targetID string, sessionID string) (bool, map[string]any, []map[string]any) {
+func localCDPResponse(message map[string]any, targetID string, sessionID string, page Page) (bool, map[string]any, []map[string]any) {
 	id, _ := numericInt(message["id"])
 	method, _ := message["method"].(string)
 	result := map[string]any{}
@@ -271,6 +257,10 @@ func localCDPResponse(message map[string]any, targetID string, sessionID string)
 				"sessionId": sessionID,
 				"targetInfo": map[string]any{
 					"targetId": targetID,
+					"type":     "page",
+					"title":    page.Title,
+					"url":      page.URL,
+					"attached": true,
 				},
 				"waitingForDebugger": true,
 			},
@@ -312,7 +302,7 @@ func localCDPResponse(message map[string]any, targetID string, sessionID string)
 		result["id"] = 0
 	case "Page.getNavigationHistory":
 		result["currentIndex"] = 0
-		result["entries"] = []map[string]any{{"id": 0, "url": "", "title": ""}}
+		result["entries"] = []map[string]any{{"id": 0, "url": page.URL, "title": page.Title}}
 	default:
 		return false, nil, nil
 	}

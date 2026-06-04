@@ -3,7 +3,7 @@ package webinspector
 import "testing"
 
 func TestLocalCDPResponse(t *testing.T) {
-	handled, response, extra := localCDPResponse(map[string]any{"id": 4, "method": "Runtime.getIsolateId"}, "target-1", "session-1")
+	handled, response, extra := localCDPResponse(map[string]any{"id": 4, "method": "Runtime.getIsolateId"}, "target-1", "session-1", Page{})
 	if !handled {
 		t.Fatal("expected Runtime.getIsolateId to be handled locally")
 	}
@@ -13,6 +13,19 @@ func TestLocalCDPResponse(t *testing.T) {
 	}
 	if len(extra) != 0 {
 		t.Fatalf("unexpected extra events: %#v", extra)
+	}
+}
+
+func TestLocalCDPNavigationHistoryUsesPageMetadata(t *testing.T) {
+	page := Page{URL: "https://example.test/", Title: "Example"}
+	handled, response, _ := localCDPResponse(map[string]any{"id": 5, "method": "Page.getNavigationHistory"}, "target-1", "session-1", page)
+	if !handled {
+		t.Fatal("expected Page.getNavigationHistory to be handled locally")
+	}
+	result := response["result"].(map[string]any)
+	entries := result["entries"].([]map[string]any)
+	if entries[0]["url"] != page.URL || entries[0]["title"] != page.Title {
+		t.Fatalf("unexpected navigation entry: %#v", entries[0])
 	}
 }
 
