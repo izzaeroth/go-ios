@@ -1,17 +1,15 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
-	"io"
+	"log/slog"
 	"os"
 	"os/signal"
-	"path"
 	"path/filepath"
 	"runtime/debug"
 	"sort"
@@ -21,22 +19,12 @@ import (
 	"time"
 
 	"golang.org/x/crypto/pkcs12"
+	"golang.org/x/term"
 
+	"github.com/danielpaulus/go-ios/internal/clihelp"
 	"github.com/danielpaulus/go-ios/ios/debugproxy"
-	"github.com/danielpaulus/go-ios/ios/deviceinfo"
-	"github.com/danielpaulus/go-ios/ios/house_arrest"
 	"github.com/danielpaulus/go-ios/ios/tunnel"
 
-	"github.com/danielpaulus/go-ios/ios/amfi"
-	"github.com/danielpaulus/go-ios/ios/mobileactivation"
-
-	"github.com/danielpaulus/go-ios/ios/afc"
-	"github.com/danielpaulus/go-ios/ios/fileservice"
-
-	"github.com/danielpaulus/go-ios/ios/crashreport"
-	"github.com/danielpaulus/go-ios/ios/testmanagerd"
-
-	"github.com/danielpaulus/go-ios/ios/debugserver"
 	"github.com/danielpaulus/go-ios/ios/imagemounter"
 	"github.com/danielpaulus/go-ios/ios/zipconduit"
 
@@ -50,10 +38,10 @@ import (
 	"github.com/danielpaulus/go-ios/ios/instruments"
 	"github.com/danielpaulus/go-ios/ios/mcinstall"
 	"github.com/danielpaulus/go-ios/ios/notificationproxy"
-	"github.com/danielpaulus/go-ios/ios/pcap"
+	"github.com/danielpaulus/go-ios/ios/ostrace"
+	"github.com/danielpaulus/go-ios/ios/springboard"
 	syslog "github.com/danielpaulus/go-ios/ios/syslog"
 	"github.com/docopt/docopt-go"
-	log "github.com/sirupsen/logrus"
 )
 
 // JSONdisabled enables or disables output in JSON format
@@ -70,6 +58,14 @@ const version = "local-build"
 
 // Main Exports main for testing
 func Main() {
+	helpCatalog, err := clihelp.Load()
+	exitIfError("failed loading help definitions", err)
+	if handled, exitCode := helpCatalog.WriteHelp(os.Args[1:], version, os.Stdout, os.Stderr); handled {
+		if exitCode != 0 {
+			os.Exit(exitCode)
+		}
+		return
+	}
 
 	usage := fmt.Sprintf(`go-ios %s
 
@@ -125,6 +121,7 @@ Usage:
   ios prepare cloudconfig [options]
   ios prepare create-cert
   ios prepare printskip
+  ios wifi [--ssid=<ssid>] [--password=<password>] [--enc-type=<encType>] [--remove] [options]
   ios profile add <profileFile> [--p12file=<orgid>] [--password=<p12password>] [options]
   ios profile list [options]
   ios profile remove <profileName> [options]
@@ -140,7 +137,13 @@ Usage:
   ios screenshot [options] [--output=<outfile>] [--stream] [--port=<port>]
   ios setlocation [options] [--lat=<lat>] [--lon=<lon>]
   ios setlocationgpx [options] [--gpxfilepath=<gpxfilepath>]
+  ios shutdown [options]
+  ios set-wallpaper <imagePath> [--screen=<screen>] [--p12file=<orgid>] [--password=<p12password>] [options]
+  ios get-wallpaper [--output=<outfile>] [options]
+  ios get-icon-layout [--output=<outfile>] [options]
+  ios set-icon-layout <layoutFile> [options]
   ios syslog [--parse] [options]
+  ios ostrace [--pid=<processID>] [--process=<processName>] [--follow] [--level=<levels>] [--subsystem=<sub>] [--match=<str>] [--exclude=<str>] [options]
   ios sysmontap [options]
   ios timeformat (24h | 12h | toggle | get) [--force] [options]
   ios tunnel ls [options]
@@ -158,7 +161,10 @@ Options:
   -h --help                 Show this screen.
   --udid=<udid>             UDID of the device. Can also be set via GO_IOS_UDID environment variable.
   --tunnel-info-port=<port> When go-ios is used to manage tunnels for iOS 17+,
-                            it exposes them on an HTTP-API for localhost (default port: 28100)
+                            it exposes them on an HTTP-API (default port: 28100)
+  --tunnel-info-host=<host> Host the tunnel-info HTTP-API binds to and is queried on.
+                            Defaults to 127.0.0.1, or the GO_IOS_AGENT_HOST environment variable
+                            if set. Use 0.0.0.0 to reach the API from another host or container.
   --address=<ipv6addrr>     Address of the device on the interface.
                             This parameter is optional and can be set if a tunnel created by MacOS needs to be used.
                             To get this value run "log stream --debug --info --predicate 'eventMessage LIKE "*Tunnel established*" OR eventMessage LIKE "*for server port*"'",
@@ -327,6 +333,10 @@ The commands work as following:
 
     ios prepare printskip                                              Print all options you can skip.
 
+	ios wifi [--ssid=<ssid>] [--password=<password>] [--enc-type=<encType>] [--remove]
+																		Installs a wifi profile on the device forcing a connection to the provided WiFi network
+																		If --remove is specified, the wifi profile of the provided ssid will be removed.
+
     ios profile add <profileFile> [--p12file=<orgid>] [--password=<p12password>]
                                                                        Install profile file on the device.
                                                                        If supervised set p12file and password or the environment variable 'P12_PASSWORD'
@@ -374,7 +384,43 @@ The commands work as following:
     ios setlocationgpx [options] [--gpxfilepath=<gpxfilepath>]      Updates the location of the device based on the data in a GPX file.
                                                                     Ex.: setlocationgpx --gpxfilepath=/home/username/location.gpx
 
+    ios shutdown [options]                                          Shuts down the device
+
+    ios set-wallpaper <imagePath> [--screen=<screen>] [--p12file=<orgid>] [--password=<p12password>] [options]
+                                                                    Set the device wallpaper from a JPEG/PNG file. --screen is lock|home|both (default home).
+                                                                    Requires supervision: pass the supervisor identity .p12 with --p12file and the password
+                                                                    via --password or P12_PASSWORD env var. Note: on iOS 16+ both lock and home screens are
+                                                                    linked as a pair, so the device sets both regardless of --screen. The flag is preserved
+                                                                    for older-iOS / forward-compat. Apple's own cfgutil exhibits the same behavior.
+
+    ios get-wallpaper [--output=<outfile>] [options]                Save the home screen wallpaper as PNG. Default output is wallpaper.png.
+                                                                    Does not require supervision. Lock screen wallpaper is not exposed by iOS.
+                                                                    Note: this RPC may EOF on iOS 18 (see pymobiledevice3 #1450).
+
+    ios get-icon-layout [--output=<outfile>] [options]              Save the home screen icon layout as JSON (default stdout). Round-trippable: feed the
+                                                                    file back to set-icon-layout to restore. Note: the iOS 14+ "Edit Pages" per-page
+                                                                    hidden bit is not exposed by springboardservices, so a fetched layout will not include
+                                                                    hidden pages.
+
+    ios set-icon-layout <layoutFile> [options]                      Push a previously-saved icon layout JSON file back to the device.
+                                                                    iOS requires every installed app to occupy a slot. Per cfgutil docs: "unexpected
+                                                                    behavior may occur if the given layout does not contain every icon on the device".
+                                                                    Missing apps are re-paginated, not hidden.
+
     ios syslog [--parse] [options]                                  Prints a device's log output, Use --parse to parse the fields from the log
+    ios ostrace [--pid=<processID>] [--process=<processName>] [--follow] [--level=<levels>] [--subsystem=<sub>] [--match=<str>] [--exclude=<str>]
+                                                                     Stream structured syslog via os_trace_relay. Note: streaming logs
+                                                                     places significant CPU load on the device.
+                                                                       --follow             Keep running and reconnect when the process exits or restarts.
+                                                                                            When used with --process, polls until the process appears.
+                                                                     Device-side filters (reduce USB traffic):
+                                                                       --pid=<pid>           Only stream logs from this process ID
+                                                                       --process=<name>      Resolve process name to PID, then filter device-side
+                                                                       --level=<levels>      Filter by OS log type (comma-separated): default,info,debug,error,fault
+                                                                     Client-side filters (applied after receiving, does not reduce USB traffic):
+                                                                       --subsystem=<sub>     Only show entries matching this subsystem (substring match)
+                                                                       --match=<str>         Only show entries where the message contains this string
+                                                                       --exclude=<str>       Hide entries where the message contains this string
     ios sysmontap                                                   Get system stats like MEM, CPU
 
     ios timeformat (24h | 12h | toggle | get) [--force] [options]   Sets, or returns the state of the "time format".
@@ -403,1232 +449,30 @@ The commands work as following:
   `, version)
 	arguments, err := docopt.ParseDoc(usage)
 	exitIfError("failed parsing args", err)
-	disableJSON, _ := arguments.Bool("--nojson")
-	if disableJSON {
-		JSONdisabled = true
-	} else {
-		log.SetFormatter(&log.JSONFormatter{})
-	}
-
-	pretty, _ := arguments.Bool("--pretty")
-	if pretty {
-		prettyJSON = true
-	}
-
-	traceLevelEnabled, _ := arguments.Bool("--trace")
-	if traceLevelEnabled {
-		log.Info("Set Trace mode")
-		log.SetLevel(log.TraceLevel)
-	} else {
-
-		verboseLoggingEnabledLong, _ := arguments.Bool("--verbose")
-
-		if verboseLoggingEnabledLong {
-			log.Info("Set Debug mode")
-			log.SetLevel(log.DebugLevel)
-		}
-	}
-	// log.SetReportCaller(true)
-	log.Debug(arguments)
-
-	skipAgent, _ := os.LookupEnv("ENABLE_GO_IOS_AGENT")
-	if skipAgent == "user" || skipAgent == "kernel" {
-		tunnel.RunAgent(skipAgent)
-	}
-
-	if !tunnel.IsAgentRunning() {
-		log.Warn("go-ios agent is not running. You might need to start it with 'ios tunnel start' for ios17+. Use ENABLE_GO_IOS_AGENT=user for userspace tunnel or ENABLE_GO_IOS_AGENT=kernel for kernel tunnel for the experimental daemon mode.")
-	}
-	shouldPrintVersionNoDashes, _ := arguments.Bool("version")
-	shouldPrintVersion, _ := arguments.Bool("--version")
-	if shouldPrintVersionNoDashes || shouldPrintVersion {
-		printVersion()
+	configureCLI(arguments)
+	if dispatchCommand(commandContext{Args: arguments}, preProxyCommands) {
 		return
 	}
+
 	proxyUrl, _ := arguments.String("--proxyurl")
 	exitIfError("could not parse proxy url", ios.UseHttpProxy(proxyUrl))
 
-	b, _ := arguments.Bool("listen")
-	if b {
-		startListening()
+	if dispatchCommand(commandContext{Args: arguments}, globalCommands) {
 		return
 	}
 
-	listCommand, _ := arguments.Bool("list")
-	diagnosticsCommand, _ := arguments.Bool("diagnostics")
-	imageCommand, _ := arguments.Bool("image")
-	deviceStateCommand, _ := arguments.Bool("devicestate")
-	profileCommand, _ := arguments.Bool("profile")
+	tunnelInfo := tunnelInfoConfigFromArgs(arguments)
+	device := resolveDevice(arguments, tunnelInfo)
 
-	if listCommand && !diagnosticsCommand && !imageCommand && !deviceStateCommand && !profileCommand {
-		b, _ = arguments.Bool("--details")
-		printDeviceList(b)
+	if dispatchCommand(commandContext{Args: arguments, Device: device}, deviceCommands) {
 		return
 	}
 
-	tunnelInfoHost, err := arguments.String("--tunnel-info-host")
-	if err != nil {
-		tunnelInfoHost = ios.HttpApiHost()
-	}
-
-	tunnelInfoPort, err := arguments.Int("--tunnel-info-port")
-	if err != nil {
-		tunnelInfoPort = ios.HttpApiPort()
-	}
-
-	tunnelCommand, _ := arguments.Bool("tunnel")
-
-	udid, _ := arguments.String("--udid")
-	if udid == "" {
-		udid = os.Getenv("GO_IOS_UDID")
-	}
-	address, addressErr := arguments.String("--address")
-	rsdPort, rsdErr := arguments.Int("--rsd-port")
-	userspaceTunnelHost, userspaceTunnelHostErr := arguments.String("--userspace-host")
-	if userspaceTunnelHostErr != nil {
-		userspaceTunnelHost = ios.HttpApiHost()
-	}
-
-	userspaceTunnelPort, userspaceTunnelErr := arguments.Int("--userspace-port")
-
-	device, err := ios.GetDevice(udid)
-	// device address and rsd port are only available after the tunnel started
-	if !tunnelCommand {
-		exitIfError("Device not found: "+udid, err)
-		if addressErr == nil && rsdErr == nil {
-			if userspaceTunnelErr == nil {
-				device.UserspaceTUN = true
-				device.UserspaceTUNHost = userspaceTunnelHost
-				device.UserspaceTUNPort = userspaceTunnelPort
-			}
-			device = deviceWithRsdProvider(device, udid, address, rsdPort)
-		} else {
-			info, err := tunnel.TunnelInfoForDevice(device.Properties.SerialNumber, tunnelInfoHost, tunnelInfoPort)
-			if err == nil {
-				device.UserspaceTUNPort = info.UserspaceTUNPort
-				device.UserspaceTUNHost = userspaceTunnelHost
-				device.UserspaceTUN = info.UserspaceTUN
-				device = deviceWithRsdProvider(device, udid, info.Address, info.RsdPort)
-			} else {
-				log.WithField("udid", device.Properties.SerialNumber).Warn("failed to get tunnel info")
-			}
-		}
-	}
-
-	b, _ = arguments.Bool("erase")
-	if b {
-		force, _ := arguments.Bool("--force")
-		if !force {
-			log.Warnf("are you sure you want to erase device %s? (y/n)", device.Properties.SerialNumber)
-			reader := bufio.NewReader(os.Stdin)
-			// ReadString will block until the delimiter is entered
-			input, err := reader.ReadString('\n')
-			exitIfError("An error occured while reading input", err)
-			if !strings.HasPrefix(input, "y") {
-				log.Errorf("abort")
-				return
-			}
-		}
-
-		exitIfError("failed erasing", mcinstall.Erase(device))
-		fmt.Print(convertToJSONString("ok"))
-		return
-	}
-
-	rsdCommand, _ := arguments.Bool("rsd")
-	if rsdCommand {
-		listCommand, _ := arguments.Bool("ls")
-		if listCommand {
-			services := device.Rsd.GetServices()
-			if JSONdisabled {
-				fmt.Println(services)
-			} else {
-				b, err := marshalJSON(services)
-				exitIfError("failed json conversion", err)
-				fmt.Println(string(b))
-			}
-			return
-		}
-	}
-
-	if mobileGestaltCommand(device, arguments) {
-		return
-	}
-
-	if deviceStateCommand {
-		if listCommand {
-			deviceState(device, true, false, "", "")
-			return
-		}
-		enable, _ := arguments.Bool("enable")
-		profileTypeId, _ := arguments.String("<profileTypeId>")
-		profileId, _ := arguments.String("<profileId>")
-		deviceState(device, false, enable, profileTypeId, profileId)
-	}
-
-	b, _ = arguments.Bool("prepare")
-	if b {
-		b, _ = arguments.Bool("create-cert")
-		if b {
-			cert, err := ios.CreateDERFormattedSupervisionCert()
-			exitIfError("failed creating cert", err)
-			err = os.WriteFile("supervision-cert.der", cert.CertDER, 0o777)
-			log.Info("supervision-cert.der")
-			exitIfError("failed writing cert", err)
-			err = os.WriteFile("supervision-cert.pem", cert.CertPEM, 0o777)
-			log.Info("supervision-cert.pem")
-			exitIfError("failed writing cert", err)
-			err = os.WriteFile("supervision-private-key.key", cert.PrivateKeyDER, 0o777)
-			log.Info("supervision-private-key.key")
-			exitIfError("failed writing cert", err)
-			err = os.WriteFile("supervision-private-key.pem", cert.PrivateKeyPEM, 0o777)
-			log.Info("supervision-private-key.pem")
-			exitIfError("failed writing key", err)
-			err = os.WriteFile("supervision-csr.csr", []byte(cert.Csr), 0o777)
-			log.Info("supervision-csr.csr")
-			exitIfError("failed writing cert", err)
-			log.Info("Golang does not have good PKCS12 format sadly. If you need a p12 file run this: " +
-				"'openssl pkcs12 -export -inkey supervision-private-key.pem -in supervision-cert.pem -out certificate.p12 -password pass:a'")
-			return
-		}
-		b, _ = arguments.Bool("printskip")
-		if b {
-			fmt.Println(convertToJSONString(mcinstall.GetAllSetupSkipOptions()))
-			return
-		}
-		b, _ = arguments.Bool("cloudconfig")
-		if b {
-			conn, err := mcinstall.New(device)
-			exitIfError("failed connecting to mcinstall", err)
-			defer conn.Close()
-			config, err := conn.GetCloudConfiguration()
-			exitIfError("failed getting cloud configuration", err)
-			fmt.Println(convertToJSONString(config))
-			return
-		}
-		skip := mcinstall.GetAllSetupSkipOptions()
-		skip1 := arguments["--skip"].([]string)
-		if len(skip1) > 0 {
-			skip = skip1
-		}
-
-		certfile, _ := arguments.String("--certfile")
-		orgname, _ := arguments.String("--orgname")
-		locale, _ := arguments.String("--locale")
-		lang, _ := arguments.String("--lang")
-		p12password, _ := arguments.String("--p12password")
-		if p12password == "" {
-			p12password = os.Getenv("P12_PASSWORD")
-		}
-		var certBytes []byte
-		if certfile != "" {
-			rawCertBytes, err := os.ReadFile(certfile)
-			exitIfError("failed opening cert file", err)
-			if orgname == "" {
-				log.Fatal("--orgname must be specified if certfile for supervision is provided")
-			}
-			certBytes, err = extractDERCertificate(rawCertBytes, p12password)
-			exitIfError("failed to parse supervision certificate", err)
-		}
-		exitIfError("failed erasing", mcinstall.Prepare(device, skip, certBytes, orgname, locale, lang))
-		fmt.Print(convertToJSONString("ok"))
-		return
-	}
-
-	b, _ = arguments.Bool("activate")
-	if b {
-		exitIfError("failed activation", mobileactivation.Activate(device))
-		return
-	}
-
-	b, _ = arguments.Bool("ip")
-	if b {
-		ip, err := pcap.FindIp(device)
-		exitIfError("failed", err)
-		fmt.Println(convertToJSONString(ip))
-		return
-	}
-
-	if crashCommand(device, arguments) {
-		return
-	}
-	if instrumentsCommand(device, arguments) {
-		return
-	}
-
-	b, _ = arguments.Bool("pcap")
-	if b {
-		p, _ := arguments.String("--process")
-		i, _ := arguments.Int("--pid")
-		pcap.Pid = int32(i)
-		pcap.ProcName = p
-		err := pcap.Start(device)
-		if err != nil {
-			exitIfError("pcap failed", err)
-		}
-		return
-	}
-
-	b, _ = arguments.Bool("ps")
-	if b {
-		applicationsOnly, _ := arguments.Bool("--apps")
-		processList(device, applicationsOnly)
-		return
-	}
-
-	b, _ = arguments.Bool("install")
-	if b {
-		path, _ := arguments.String("--path")
-		installApp(device, path)
-		return
-	}
-
-	b, _ = arguments.Bool("uninstall")
-	if b {
-		bundleID, _ := arguments.String("<bundleID>")
-		uninstallApp(device, bundleID)
-		return
-	}
-
-	if imageCommand1(device, arguments) {
-		return
-	}
-
-	b, _ = arguments.Bool("lang")
-	if b {
-		locale, _ := arguments.String("--setlocale")
-		newlang, _ := arguments.String("--setlang")
-		log.Debugf("lang --setlocale:%s --setlang:%s", locale, newlang)
-		language(device, locale, newlang)
-		return
-	}
-
-	b, _ = arguments.Bool("assistivetouch")
-	if b {
-		force, _ := arguments.Bool("--force")
-		b, _ = arguments.Bool("enable")
-		if b {
-			assistiveTouch(device, "enable", force)
-		}
-		b, _ = arguments.Bool("disable")
-		if b {
-			assistiveTouch(device, "disable", force)
-		}
-		b, _ = arguments.Bool("toggle")
-		if b {
-			assistiveTouch(device, "toggle", force)
-		}
-		b, _ = arguments.Bool("get")
-		if b {
-			assistiveTouch(device, "get", force)
-		}
-	}
-
-	b, _ = arguments.Bool("voiceover")
-	if b {
-		force, _ := arguments.Bool("--force")
-		b, _ = arguments.Bool("enable")
-		if b {
-			voiceOver(device, "enable", force)
-		}
-		b, _ = arguments.Bool("disable")
-		if b {
-			voiceOver(device, "disable", force)
-		}
-		b, _ = arguments.Bool("toggle")
-		if b {
-			voiceOver(device, "toggle", force)
-		}
-		b, _ = arguments.Bool("get")
-		if b {
-			voiceOver(device, "get", force)
-		}
-	}
-
-	b, _ = arguments.Bool("zoom")
-	if b {
-		force, _ := arguments.Bool("--force")
-		b, _ = arguments.Bool("enable")
-		if b {
-			zoomTouch(device, "enable", force)
-		}
-		b, _ = arguments.Bool("disable")
-		if b {
-			zoomTouch(device, "disable", force)
-		}
-		b, _ = arguments.Bool("toggle")
-		if b {
-			zoomTouch(device, "toggle", force)
-		}
-		b, _ = arguments.Bool("get")
-		if b {
-			zoomTouch(device, "get", force)
-		}
-	}
-
-	b, _ = arguments.Bool("dproxy")
-	if b {
-		log.SetFormatter(&log.TextFormatter{})
-		// log.SetLevel(log.DebugLevel)
-		binaryMode, _ := arguments.Bool("--binary")
-		startDebugProxy(device, binaryMode)
-		return
-	}
-
-	b, _ = arguments.Bool("info")
-	if b {
-		if display, _ := arguments.Bool("display"); display {
-			deviceInfo, err := deviceinfo.NewDeviceInfo(device)
-			exitIfError("Can't connect to deviceinfo service", err)
-			defer deviceInfo.Close()
-
-			info, err := deviceInfo.GetDisplayInfo()
-			exitIfError("Can't fetch dispaly info", err)
-
-			fmt.Println(convertToJSONString(info))
-		} else if lockdown, _ := arguments.Bool("lockdown"); lockdown {
-			printDeviceInfo(device)
-		} else {
-			// When subcommand is missing, it defaults to lockdown.
-			// Unknown subcommands don't reach this line and quit early.
-			printDeviceInfo(device)
-		}
-		return
-	}
-
-	lockdownCommand, _ := arguments.Bool("lockdown")
-	if lockdownCommand {
-		b, _ = arguments.Bool("get")
-		if b {
-			key := ""
-			if keyArg := arguments["<key>"]; keyArg != nil {
-				if keys, ok := keyArg.([]string); ok && len(keys) > 0 {
-					key = keys[0]
-				}
-			}
-			domain, _ := arguments.String("--domain")
-
-			lockdownConnection, err := ios.ConnectLockdownWithSession(device)
-			exitIfError("failed connecting to lockdown", err)
-			defer lockdownConnection.Close()
-
-			if key == "" && domain == "" {
-				// No key or domain specified, return all values
-				allValues, err := lockdownConnection.GetValues()
-				exitIfError("failed getting lockdown values", err)
-				fmt.Println(convertToJSONString(allValues.Value))
-			} else if domain != "" {
-				// Query from specific domain (key is optional, empty key returns all domain values)
-				value, err := lockdownConnection.GetValueForDomain(key, domain)
-				exitIfError(fmt.Sprintf("failed getting value from domain '%s'", domain), err)
-				fmt.Println(convertToJSONString(value))
-			} else {
-				// Query specific key from default domain
-				value, err := lockdownConnection.GetValue(key)
-				exitIfError(fmt.Sprintf("failed getting lockdown value '%s'", key), err)
-				fmt.Println(convertToJSONString(value))
-			}
-			return
-		}
-	}
-
-	b, _ = arguments.Bool("syslog")
-	if b {
-		parse, _ := arguments.Bool("--parse")
-
-		runSyslog(device, parse)
-		return
-	}
-
-	b, _ = arguments.Bool("screenshot")
-	if b {
-		stream, _ := arguments.Bool("--stream")
-		port, _ := arguments.String("--port")
-		path, _ := arguments.String("--output")
-		if stream {
-			if port == "" {
-				port = "3333"
-			}
-			err := instruments.StartMJPEGStreamingServer(device, port)
-			exitIfError("failed starting mjpeg", err)
-			return
-		}
-		saveScreenshot(device, path)
-		return
-	}
-
-	b, _ = arguments.Bool("setlocation")
-	if b {
-		lat, _ := arguments.String("--lat")
-		lon, _ := arguments.String("--lon")
-
-		if device.SupportsRsd() {
-			server, err := instruments.NewLocationSimulationService(device)
-			exitIfError("failed to create location simulation service:", err)
-
-			startLocationSimulation(server, lat, lon)
-			return
-		}
-
-		setLocation(device, lat, lon)
-		return
-	}
-
-	b, _ = arguments.Bool("setlocationgpx")
-	if b {
-		gpxFilePath, _ := arguments.String("--gpxfilepath")
-		setLocationGPX(device, gpxFilePath)
-		return
-	}
-
-	b, _ = arguments.Bool("resetlocation")
-	if b {
-		resetLocation(device)
-		return
-	}
-
-	b, _ = arguments.Bool("devicename")
-	if b {
-		printDeviceName(device)
-		return
-	}
-
-	b, _ = arguments.Bool("apps")
-
-	if b {
-		list, _ := arguments.Bool("--list")
-		system, _ := arguments.Bool("--system")
-		all, _ := arguments.Bool("--all")
-		filesharing, _ := arguments.Bool("--filesharing")
-		printInstalledApps(device, system, all, list, filesharing)
-		return
-	}
-
-	b, _ = arguments.Bool("date")
-	if b {
-		printDeviceDate(device)
-		return
-	}
-	b, _ = arguments.Bool("diagnostics")
-	if b {
-		printDiagnostics(device)
-		return
-	}
-
-	b, _ = arguments.Bool("timeformat")
-	if b {
-		force, _ := arguments.Bool("--force")
-		b, _ = arguments.Bool("24h")
-		if b {
-			timeFormat(device, "24h", force)
-		}
-		b, _ = arguments.Bool("12h")
-		if b {
-			timeFormat(device, "12h", force)
-		}
-		b, _ = arguments.Bool("toggle")
-		if b {
-			timeFormat(device, "toggle", force)
-		}
-		b, _ = arguments.Bool("get")
-		if b {
-			timeFormat(device, "get", force)
-		}
-	}
-
-	b, _ = arguments.Bool("pair")
-	if b {
-		org, _ := arguments.String("--p12file")
-		pwd, _ := arguments.String("--password")
-		if pwd == "" {
-			pwd = os.Getenv("P12_PASSWORD")
-		}
-		pairDevice(device, org, pwd)
-		return
-	}
-
-	b, _ = arguments.Bool("readpair")
-	if b {
-		readPair(device)
-		return
-	}
-
-	b, _ = arguments.Bool("httpproxy")
-	if b {
-		removeCommand, _ := arguments.Bool("remove")
-		if removeCommand {
-			mcinstall.RemoveProxy(device)
-			exitIfError("failed removing proxy", err)
-			log.Info("success")
-			return
-		}
-		host, _ := arguments.String("<host>")
-		port, _ := arguments.String("<port>")
-		user, _ := arguments.String("<user>")
-		pass, _ := arguments.String("<pass>")
-		if pass == "" {
-			pass = os.Getenv("PROXY_PASSWORD")
-		}
-		p12file, _ := arguments.String("--p12file")
-		p12password, _ := arguments.String("--password")
-		if p12password == "" {
-			p12password = os.Getenv("P12_PASSWORD")
-		}
-		p12bytes, err := os.ReadFile(p12file)
-		exitIfError("could not read p12-file", err)
-
-		err = mcinstall.SetHttpProxy(device, host, port, user, pass, p12bytes, p12password)
-		exitIfError("failed", err)
-		log.Info("success")
-		return
-	}
-
-	b, _ = arguments.Bool("profile")
-	if b {
-		if listCommand {
-			handleProfileList(device)
-		}
-		b, _ = arguments.Bool("add")
-		if b {
-			name, _ := arguments.String("<profileFile>")
-			p12file, _ := arguments.String("--p12file")
-			p12password, _ := arguments.String("--password")
-			if p12password == "" {
-				p12password = os.Getenv("P12_PASSWORD")
-			}
-			if p12file != "" {
-				handleProfileAddSupervised(device, name, p12file, p12password)
-				return
-			}
-			handleProfileAdd(device, name)
-		}
-		b, _ = arguments.Bool("remove")
-		if b {
-			name, _ := arguments.String("<profileName>")
-			handleProfileRemove(device, name)
-		}
-
-		return
-	}
-
-	b, _ = arguments.Bool("forward")
-	if b {
-		// Check for new --port syntax first (multi-forward)
-		mappings, _ := arguments["--port"].([]string)
-		if len(mappings) > 0 {
-			startMultiForwarding(device, mappings)
-		} else {
-			// Backwards compatible: single forward
-			hostPort, _ := arguments.Int("<hostPort>")
-			targetPort, _ := arguments.Int("<targetPort>")
-			startForwarding(device, uint16(hostPort), uint16(targetPort))
-		}
-		return
-	}
-
-	b, _ = arguments.Bool("launch")
-	if b {
-		wait, _ := arguments.Bool("--wait")
-		bKillExisting, _ := arguments.Bool("--kill-existing")
-		bundleID, _ := arguments.String("<bundleID>")
-		if bundleID == "" {
-			log.Fatal("please provide a bundleID")
-		}
-		pControl, err := instruments.NewProcessControl(device)
-		exitIfError("processcontrol failed", err)
-		opts := map[string]any{}
-		if bKillExisting {
-			opts["KillExisting"] = 1
-		} // end if
-		args := toArgs(arguments["--arg"].([]string))
-		envs := toEnvs(arguments["--env"].([]string))
-		pid, err := pControl.LaunchAppWithArgs(bundleID, args, envs, opts)
-		exitIfError("launch app command failed", err)
-		log.WithFields(log.Fields{"pid": pid}).Info("Process launched")
-		if wait {
-			c := make(chan os.Signal, 1)
-			signal.Notify(c, syscall.SIGINT, syscall.SIGTERM)
-			<-c
-			log.WithFields(log.Fields{"pid": pid}).Info("stop listening to logs")
-		}
-	}
-
-	b, _ = arguments.Bool("sysmontap")
-	if b {
-		printSysmontapStats(device)
-	}
-
-	b, _ = arguments.Bool("memlimitoff")
-	if b {
-		processName, _ := arguments.String("--process")
-
-		pControl, err := instruments.NewProcessControl(device)
-		exitIfError("processcontrol failed", err)
-		defer pControl.Close()
-
-		svc, err := instruments.NewDeviceInfoService(device)
-		exitIfError("failed opening deviceInfoService for getting process list", err)
-		defer svc.Close()
-
-		processList, _ := svc.ProcessList()
-		for _, process := range processList {
-			if process.Pid > 1 && process.Name == processName {
-				disabled, err := pControl.DisableMemoryLimit(process.Pid)
-				exitIfError("DisableMemoryLimit failed", err)
-				log.WithFields(log.Fields{"process": process.Name, "pid": process.Pid}).Info("memory limit is off: ", disabled)
-			}
-		}
-	}
-
-	b, _ = arguments.Bool("kill")
-	if b {
-		var response []installationproxy.AppInfo
-		bundleID, _ := arguments.String("<bundleID>")
-		processIDint, _ := arguments.Int("--pid")
-		processName, _ := arguments.String("--process")
-
-		processID := uint64(processIDint)
-
-		// Technically "Mach Kernel" is process 0, I suppose we provide no way to attempt to kill that.
-		if bundleID == "" && processID == 0 && processName == "" {
-			log.Fatal("please provide a bundleID")
-		}
-		pControl, err := instruments.NewProcessControl(device)
-		exitIfError("processcontrol failed", err)
-		svc, _ := installationproxy.New(device)
-
-		// Look for correct process exe name for this bundleID. By default, searches only user-installed apps.
-		if bundleID != "" {
-			response, err = svc.BrowseAllApps()
-			exitIfError("browsing apps failed", err)
-
-			for _, app := range response {
-				if app.CFBundleIdentifier() == bundleID {
-					processName = app.CFBundleExecutable()
-					break
-				}
-			}
-			if processName == "" {
-				log.Errorf("%s not installed", bundleID)
-				os.Exit(1)
-				return
-			}
-		}
-
-		service, err := instruments.NewDeviceInfoService(device)
-		defer service.Close()
-		exitIfError("failed opening deviceInfoService for getting process list", err)
-		processList, _ := service.ProcessList()
-		// ps
-		for _, p := range processList {
-			if (processID > 0 && p.Pid == processID) || (processName != "" && p.Name == processName) {
-				err = pControl.KillProcess(p.Pid)
-				exitIfError("kill process failed ", err)
-				if bundleID != "" {
-					log.WithFields(log.Fields{"pid": p.Pid}).Info(bundleID, " killed, Pid: ", p.Pid)
-				} else {
-					log.WithFields(log.Fields{"pid": p.Pid}).Info(p.Name, " killed, Pid: ", p.Pid)
-				}
-				return
-			}
-		}
-		if bundleID != "" {
-			log.Error("process of ", bundleID, " not found")
-		} else if processName != "" {
-			log.Error("process named ", processName, " not found")
-		} else {
-			log.Error("process with pid ", processID, " not found")
-		}
-		os.Exit(1)
-		return
-	}
-
-	b, _ = arguments.Bool("runtest")
-	if b {
-		bundleID, _ := arguments.String("--bundle-id")
-		testRunnerBundleId, _ := arguments.String("--test-runner-bundle-id")
-		xctestConfig, _ := arguments.String("--xctest-config")
-
-		testsToRunArg := arguments["--test-to-run"]
-		var testsToRun []string
-		if testsToRunArg != nil && len(testsToRunArg.([]string)) > 0 {
-			testsToRun = testsToRunArg.([]string)
-		}
-
-		testsToSkipArg := arguments["--test-to-skip"]
-		var testsToSkip []string
-		testsToSkip = nil
-		if testsToSkipArg != nil && len(testsToSkipArg.([]string)) > 0 {
-			testsToSkip = testsToSkipArg.([]string)
-		}
-
-		rawTestlog, rawTestlogErr := arguments.String("--log-output")
-		env := splitKeyValuePairs(arguments["--env"].([]string), "=")
-		isXCTest, _ := arguments.Bool("--xctest")
-
-		config := testmanagerd.TestConfig{
-			BundleId:           bundleID,
-			TestRunnerBundleId: testRunnerBundleId,
-			XctestConfigName:   xctestConfig,
-			Env:                env,
-			TestsToRun:         testsToRun,
-			TestsToSkip:        testsToSkip,
-			XcTest:             isXCTest,
-			Device:             device,
-		}
-
-		if rawTestlogErr == nil {
-			var writer *os.File = os.Stdout
-			if rawTestlog != "-" {
-				file, err := os.Create(rawTestlog)
-				exitIfError("Cannot open file "+rawTestlog, err)
-				writer = file
-			}
-			defer writer.Close()
-
-			config.Listener = testmanagerd.NewTestListener(writer, writer, os.TempDir())
-
-			testResults, err := testmanagerd.RunTestWithConfig(context.TODO(), config)
-			if err != nil {
-				log.WithFields(log.Fields{"error": err}).Info("Failed running Xcuitest")
-			}
-
-			log.Info(fmt.Printf("%+v", testResults))
-		} else {
-			config.Listener = testmanagerd.NewTestListener(io.Discard, io.Discard, os.TempDir())
-			_, err := testmanagerd.RunTestWithConfig(context.TODO(), config)
-			if err != nil {
-				log.WithFields(log.Fields{"error": err}).Info("Failed running Xcuitest")
-			}
-		}
-		return
-	}
-
-	b, _ = arguments.Bool("runxctest")
-	if b {
-		xctestrunFilePath, _ := arguments.String("--xctestrun-file-path")
-
-		rawTestlog, rawTestlogErr := arguments.String("--log-output")
-
-		if rawTestlogErr == nil {
-			var writer *os.File = os.Stdout
-			if rawTestlog != "-" {
-				file, err := os.Create(rawTestlog)
-				exitIfError("Cannot open file "+rawTestlog, err)
-				writer = file
-			}
-			defer writer.Close()
-			var listener = testmanagerd.NewTestListener(writer, writer, os.TempDir())
-
-			testResults, err := testmanagerd.StartXCTestWithConfig(context.TODO(), xctestrunFilePath, device, listener)
-			if err != nil {
-				log.WithFields(log.Fields{"error": err}).Info("Failed running Xctest")
-			}
-
-			log.Info(fmt.Printf("%+v", testResults))
-		} else {
-			var listener = testmanagerd.NewTestListener(io.Discard, io.Discard, os.TempDir())
-			_, err := testmanagerd.StartXCTestWithConfig(context.TODO(), xctestrunFilePath, device, listener)
-			if err != nil {
-				log.WithFields(log.Fields{"error": err}).Info("Failed running Xctest")
-			}
-		}
-		return
-	}
-
-	if runWdaCommand(device, arguments) {
-		return
-	}
-
-	b, _ = arguments.Bool("ax")
-	if b {
-		startAx(device, arguments)
-		return
-	}
-
-	b, _ = arguments.Bool("resetax")
-	if b {
-		resetAx(device)
-		return
-	}
-
-	b, _ = arguments.Bool("debug")
-	if b {
-		appPath, _ := arguments.String("<app_path>")
-		if appPath == "" {
-			log.Fatal("parameter bundleid and app_path must be specified")
-		}
-		stopAtEntry, _ := arguments.Bool("--stop-at-entry")
-		err = debugserver.Start(device, appPath, stopAtEntry)
-		if err != nil {
-			log.Error(err.Error())
-		}
-	}
-
-	b, _ = arguments.Bool("batteryregistry")
-	if b {
-		printBatteryRegistry(device)
-	}
-
-	b, _ = arguments.Bool("reboot")
-	if b {
-		err := diagnostics.Reboot(device)
-		if err != nil {
-			log.Error(err)
-		} else {
-			log.Info("ok")
-		}
-		return
-	}
-
-	b, _ = arguments.Bool("file")
-	if b {
-		// file command uses RemoteXPC (iOS 17+) and requires tunnel
-		if !device.SupportsRsd() {
-			exitIfError("file command requires iOS 17+ with tunnel", fmt.Errorf("tunnel not running. Start with: ios tunnel start"))
-		}
-
-		// Determine domain from flags
-		bundleID, _ := arguments.String("--app")
-		groupID, _ := arguments.String("--app-group")
-		useCrash, _ := arguments.Bool("--crash")
-		useTemp, _ := arguments.Bool("--temp")
-
-		// Count how many domain flags were specified
-		flagCount := 0
-		if bundleID != "" {
-			flagCount++
-		}
-		if groupID != "" {
-			flagCount++
-		}
-		if useCrash {
-			flagCount++
-		}
-		if useTemp {
-			flagCount++
-		}
-
-		if flagCount > 1 {
-			exitIfError("file command", fmt.Errorf("can only specify one of: --app, --app-group, --crash, or --temp"))
-		}
-		if flagCount == 0 {
-			exitIfError("file command", fmt.Errorf("must specify one of: --app=<bundleID>, --app-group=<groupID>, --crash, or --temp"))
-		}
-
-		// Determine domain and identifier
-		var domain fileservice.Domain
-		var identifier string
-
-		if bundleID != "" {
-			domain = fileservice.DomainAppDataContainer
-			identifier = bundleID
-		} else if groupID != "" {
-			domain = fileservice.DomainAppGroupDataContainer
-			identifier = groupID
-		} else if useCrash {
-			domain = fileservice.DomainSystemCrashLogs
-			identifier = ""
-		} else if useTemp {
-			domain = fileservice.DomainTemporary
-			identifier = ""
-		}
-
-		// Create connection
-		conn, err := fileservice.New(device, domain, identifier)
-		exitIfError("file: failed to connect to file service", err)
-		defer func() {
-			if closeErr := conn.Close(); closeErr != nil {
-				log.Errorf("Failed to close file service connection: %v", closeErr)
-			}
-		}()
-
-		// Handle ls subcommand
-		b, _ = arguments.Bool("ls")
-		if b {
-			path, _ := arguments.String("--path")
-			if path == "" {
-				path = "."
-			}
-
-			files, err := conn.ListDirectory(path)
-			exitIfError("file ls: failed to list directory", err)
-
-			if !JSONdisabled {
-				result := map[string]interface{}{
-					"path":  path,
-					"files": files,
-					"count": len(files),
-				}
-				fmt.Println(convertToJSONString(result))
-			} else {
-				fmt.Printf("Files in %s:\n", path)
-				for _, file := range files {
-					fmt.Printf("  %s\n", file)
-				}
-				fmt.Printf("\nTotal: %d files\n", len(files))
-			}
-		}
-
-		// Handle pull subcommand
-		b, _ = arguments.Bool("pull")
-		if b {
-			remotePath, _ := arguments.String("--remote")
-			localPath, _ := arguments.String("--local")
-
-			if remotePath == "" {
-				exitIfError("file pull", fmt.Errorf("--remote=<path> is required"))
-			}
-			if localPath == "" {
-				exitIfError("file pull", fmt.Errorf("--local=<path> is required"))
-			}
-
-			// Create output file for streaming
-			outputFile, err := os.Create(localPath)
-			exitIfError("file pull: failed to create output file", err)
-			defer outputFile.Close()
-
-			// Download file using streaming to minimize memory usage
-			log.Infof("Downloading %s to %s...", remotePath, localPath)
-			err = conn.PullFile(remotePath, outputFile)
-			exitIfError("file pull: failed to download file", err)
-
-			// Get file size for reporting
-			fileInfo, err := outputFile.Stat()
-			exitIfError("file pull: failed to get file info", err)
-			fileSize := fileInfo.Size()
-
-			if !JSONdisabled {
-				result := map[string]interface{}{
-					"remote": remotePath,
-					"local":  localPath,
-					"size":   fileSize,
-				}
-				fmt.Println(convertToJSONString(result))
-			} else {
-				log.Infof("Downloaded %d bytes to %s", fileSize, localPath)
-			}
-		}
-
-		b, _ = arguments.Bool("push")
-		if b {
-			localPath, _ := arguments.String("--local")
-			remotePath, _ := arguments.String("--remote")
-
-			if localPath == "" || remotePath == "" {
-				exitIfError("push requires --local and --remote paths", fmt.Errorf("missing required arguments"))
-			}
-
-			// Get file info to preserve permissions
-			fileInfo, err := os.Stat(localPath)
-			exitIfError("push: failed to stat local file", err)
-
-			// Get file permissions from source file, default UID (501) and GID (501)
-			permissions := int64(fileInfo.Mode().Perm())
-			uid := int64(501)
-			gid := int64(501)
-			fileSize := fileInfo.Size()
-
-			// Open file for streaming
-			file, err := os.Open(localPath)
-			exitIfError("push: failed to open local file", err)
-			defer file.Close()
-
-			// Upload file using streaming to minimize memory usage
-			log.Infof("Uploading %s to %s...", localPath, remotePath)
-			err = conn.PushFile(remotePath, file, fileSize, permissions, uid, gid)
-			exitIfError("push: failed to upload file", err)
-
-			if !JSONdisabled {
-				result := map[string]interface{}{
-					"remote": remotePath,
-					"local":  localPath,
-					"size":   fileSize,
-				}
-				fmt.Println(convertToJSONString(result))
-			} else {
-				log.Infof("Uploaded %d bytes to %s", fileSize, remotePath)
-			}
-		}
-
-		return
-	}
-
-	b, _ = arguments.Bool("fsync")
-	if b {
-		containerBundleId, _ := arguments.String("--app")
-		var afcService *afc.Client
-		if containerBundleId == "" {
-			afcService, err = afc.New(device)
-		} else {
-			afcService, err = house_arrest.New(device, containerBundleId)
-		}
-		exitIfError("fsync: connect afc service failed", err)
-		b, _ = arguments.Bool("rm")
-		if b {
-			path, _ := arguments.String("--path")
-			isRecursive, _ := arguments.Bool("--r")
-			if isRecursive {
-				err = afcService.RemoveAll(path)
-			} else {
-				err = afcService.Remove(path)
-			}
-			exitIfError("fsync: remove failed", err)
-		}
-
-		b, _ = arguments.Bool("tree")
-		if b {
-			path, _ := arguments.String("--path")
-			err := afcService.WalkDir(path, func(path string, info afc.FileInfo, err error) error {
-				s := strings.Split(path, string(os.PathSeparator))
-				_, f := filepath.Split(path)
-				prefix := strings.Repeat("|  ", len(s)-1)
-
-				suffix := ""
-				if info.Type == afc.S_IFDIR {
-					suffix = "/"
-				}
-
-				fmt.Printf("%s|-%s%s\n", prefix, f, suffix)
-				return nil
-			})
-			exitIfError("fsync: tree view failed", err)
-		}
-
-		b, _ = arguments.Bool("mkdir")
-		if b {
-			path, _ := arguments.String("--path")
-			err = afcService.MkDir(path)
-			exitIfError("fsync: mkdir failed", err)
-		}
-
-		b, _ = arguments.Bool("pull")
-		if b {
-			sp, _ := arguments.String("--srcPath")
-			dp, _ := arguments.String("--dstPath")
-			if dp != "" {
-				ret, _ := ios.PathExists(dp)
-				if !ret {
-					err = os.MkdirAll(dp, os.ModePerm)
-					exitIfError("mkdir failed", err)
-				}
-			}
-
-			dp = path.Join(dp, filepath.Base(sp))
-			err = afcService.Pull(sp, dp)
-			exitIfError("fsync: pull failed", err)
-		}
-		b, _ = arguments.Bool("push")
-		if b {
-			sp, _ := arguments.String("--srcPath")
-			dp, _ := arguments.String("--dstPath")
-
-			err = afcService.Push(sp, dp)
-			exitIfError("fsync: push failed", err)
-		}
-		afcService.Close()
-		return
-	}
-
-	b, _ = arguments.Bool("diskspace")
-	if b {
-		afcService, err := afc.New(device)
-		exitIfError("connect afc service failed", err)
-		info, err := afcService.DeviceInfo()
-		exitIfError("get device info push failed", err)
-		if JSONdisabled {
-			fmt.Printf("      Model: %s\n", info.Model)
-			fmt.Printf("  BlockSize: %d\n", info.BlockSize)
-			fmt.Printf("  FreeSpace: %s\n", ios.ByteCountDecimal(int64(info.FreeBytes)))
-			fmt.Printf("  UsedSpace: %s\n", ios.ByteCountDecimal(int64(info.TotalBytes-info.FreeBytes)))
-			fmt.Printf(" TotalSpace: %s\n", ios.ByteCountDecimal(int64(info.TotalBytes)))
-		} else {
-			fmt.Println(convertToJSONString(info))
-		}
-		return
-	}
-
-	b, _ = arguments.Bool("batterycheck")
-	if b {
-		printBatteryDiagnostics(device)
-		return
-	}
-
-	if tunnelCommand {
-		startCommand, _ := arguments.Bool("start")
-		useUserspaceNetworking, _ := arguments.Bool("--userspace")
-		if startCommand && !useUserspaceNetworking {
-			err := ios.CheckRoot()
-			exitIfError("If --userspace is not set, we need sudo or an admin shell on Windows", err)
-		}
-		if useUserspaceNetworking {
-			log.Info("Using userspace networking")
-		}
-		stopagent, _ := arguments.Bool("stopagent")
-		listCommand, _ := arguments.Bool("ls")
-		if startCommand {
-			pairRecordsPath, _ := arguments.String("--pair-record-path")
-			if len(pairRecordsPath) == 0 {
-				pairRecordsPath = "."
-			}
-			if strings.ToLower(pairRecordsPath) == "default" {
-				pairRecordsPath = "/var/db/lockdown/RemotePairing/user_501"
-			}
-			startTunnel(context.TODO(), pairRecordsPath, tunnelInfoPort, useUserspaceNetworking)
-		} else if listCommand {
-			tunnels, err := tunnel.ListRunningTunnels(tunnelInfoHost, tunnelInfoPort)
-			exitIfError("failed to get tunnel infos", err)
-			if disableJSON {
-				for index, t := range tunnels {
-					if 0 != index {
-						fmt.Println()
-					}
-					fmt.Printf("Udid: %s\n  Address: %s\n  RsdPort: %d\n  UserspaceTUN: %v\n  UserspaceTUNPort: %d\n",
-						t.Udid, t.Address, t.RsdPort, t.UserspaceTUN, t.UserspaceTUNPort)
-				}
-			} else {
-				fmt.Println(convertToJSONString(tunnels))
-			}
-		}
-		if stopagent {
-			err := tunnel.CloseAgent()
-			if err != nil {
-				exitIfError("failed to close agent", err)
-			}
-			return
-		}
-	}
-
-	b, _ = arguments.Bool("devmode")
-	if b {
-		enable, _ := arguments.Bool("enable")
-		get, _ := arguments.Bool("get")
-		enablePostRestart, _ := arguments.Bool("--enable-post-restart")
-		if enable {
-			err := amfi.EnableDeveloperMode(device, enablePostRestart)
-			exitIfError("Failed enabling developer mode", err)
-		}
-
-		if get {
-			devModeEnabled, _ := imagemounter.IsDevModeEnabled(device)
-			if JSONdisabled {
-				fmt.Printf("Developer mode enabled: %v\n", devModeEnabled)
-			} else {
-				result := map[string]interface{}{"DeveloperModeEnabled": devModeEnabled}
-				fmt.Println(convertToJSONString(result))
-			}
-		}
-
-		reveal, _ := arguments.Bool("reveal")
-		if reveal {
-			conn, err := amfi.New(device)
-			exitIfError("Failed connecting to AMFI service", err)
-			defer conn.Close()
-			err = conn.RevealDevMode()
-			exitIfError("Failed revealing developer mode menu", err)
-			log.Info("Developer Mode menu has been revealed on the device. Go to Settings → Privacy & Security → Developer Mode to enable it.")
-		}
-
+	if dispatchTunnelCommand(tunnelCommandContext{
+		Args:           arguments,
+		TunnelInfoHost: tunnelInfo.Host,
+		TunnelInfoPort: tunnelInfo.Port,
+	}) {
 		return
 	}
 }
@@ -1646,201 +490,27 @@ func printSysmontapStats(device ios.DeviceEntry) {
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
 
-	log.Info("starting to monitor CPU usage... Press CTRL+C to stop.")
+	slog.Info("starting to monitor CPU usage... Press CTRL+C to stop.")
 
 	for {
 		select {
 		case cpuUsageMsg, ok := <-cpuUsageChannel:
 			if !ok {
-				log.Info("CPU usage channel closed.")
+				slog.Info("CPU usage channel closed.")
 				return
 			}
-			log.WithFields(log.Fields{
-				"cpu_count":      cpuUsageMsg.CPUCount,
-				"enabled_cpus":   cpuUsageMsg.EnabledCPUs,
-				"end_time":       cpuUsageMsg.EndMachAbsTime,
-				"cpu_total_load": cpuUsageMsg.SystemCPUUsage.CPU_TotalLoad,
-			}).Info("received CPU usage data")
+			slog.Info("received CPU usage data",
+				"cpu_count", cpuUsageMsg.CPUCount,
+				"enabled_cpus", cpuUsageMsg.EnabledCPUs,
+				"end_time", cpuUsageMsg.EndMachAbsTime,
+				"cpu_total_load", cpuUsageMsg.SystemCPUUsage.CPU_TotalLoad,
+			)
 
 		case <-c:
-			log.Info("shutting down sysmontap")
+			slog.Info("shutting down sysmontap")
 			return
 		}
 	}
-}
-
-func mobileGestaltCommand(device ios.DeviceEntry, arguments docopt.Opts) bool {
-	b, _ := arguments.Bool("mobilegestalt")
-	if b {
-		conn, _ := diagnostics.New(device)
-		keys := arguments["<key>"].([]string)
-		plist, _ := arguments.Bool("--plist")
-		resp, _ := conn.MobileGestaltQuery(keys)
-		if plist {
-			fmt.Printf("%s\n", ios.ToPlist(resp))
-			return true
-		}
-		jb, _ := marshalJSON(resp)
-		fmt.Printf("%s\n", jb)
-		return true
-	}
-	return b
-}
-
-func imageCommand1(device ios.DeviceEntry, arguments docopt.Opts) bool {
-	b, _ := arguments.Bool("image")
-	if b {
-		list, _ := arguments.Bool("list")
-		if list {
-			listMountedImages(device)
-		}
-
-		path, _ := arguments.String("--path")
-
-		auto, _ := arguments.Bool("auto")
-		if auto {
-			basedir, _ := arguments.String("--basedir")
-			if basedir == "" {
-				basedir = "./devimages"
-			}
-
-			var err error
-			path, err = imagemounter.DownloadImageFor(device, basedir)
-			if err != nil {
-				log.WithFields(log.Fields{"basedir": basedir, "udid": device.Properties.SerialNumber, "err": err}).
-					Error("failed downloading image")
-				return false
-			}
-
-			log.WithFields(log.Fields{"basedir": basedir, "udid": device.Properties.SerialNumber}).Info("success downloaded image")
-		}
-
-		mount, _ := arguments.Bool("mount")
-		if mount || auto {
-			err := imagemounter.MountImage(device, path)
-			if err != nil {
-				log.WithFields(log.Fields{"image": path, "udid": device.Properties.SerialNumber, "err": err}).
-					Error("error mounting image")
-				return true
-			}
-			log.WithFields(log.Fields{"image": path, "udid": device.Properties.SerialNumber}).Info("success mounting image")
-		}
-
-		unmount, _ := arguments.Bool("unmount")
-		if unmount {
-			err := imagemounter.UnmountImage(device)
-			if err != nil {
-				log.WithFields(log.Fields{"udid": device.Properties.SerialNumber, "err": err}).
-					Error("error unmounting image")
-				return true
-			}
-			log.WithFields(log.Fields{"udid": device.Properties.SerialNumber}).Info("success unmounting image")
-		}
-	}
-	return b
-}
-
-func runWdaCommand(device ios.DeviceEntry, arguments docopt.Opts) bool {
-	b, _ := arguments.Bool("runwda")
-	if b {
-		bundleID, _ := arguments.String("--bundleid")
-		testbundleID, _ := arguments.String("--testrunnerbundleid")
-		xctestconfig, _ := arguments.String("--xctestconfig")
-		wdaargs := arguments["--arg"].([]string)
-		wdaenv := splitKeyValuePairs(arguments["--env"].([]string), "=")
-
-		if bundleID == "" && testbundleID == "" && xctestconfig == "" {
-			log.Info("no bundle ids specified, falling back to defaults")
-			bundleID, testbundleID, xctestconfig = "com.facebook.WebDriverAgentRunner.xctrunner", "com.facebook.WebDriverAgentRunner.xctrunner", "WebDriverAgentRunner.xctest"
-		}
-		if bundleID == "" || testbundleID == "" || xctestconfig == "" {
-			log.WithFields(log.Fields{"bundleid": bundleID, "testbundleid": testbundleID, "xctestconfig": xctestconfig}).Error("please specify either NONE of bundleid, testbundleid and xctestconfig or ALL of them. At least one was empty.")
-			return true
-		}
-		log.WithFields(log.Fields{"bundleid": bundleID, "testbundleid": testbundleID, "xctestconfig": xctestconfig}).Info("Running wda")
-
-		rawTestlog, rawTestlogErr := arguments.String("--log-output")
-
-		var writer io.Writer
-
-		if rawTestlogErr == nil {
-			writerCloser := os.Stdout
-			writer = writerCloser
-			if rawTestlog != "-" {
-				file, err := os.Create(rawTestlog)
-				exitIfError("Cannot open file "+rawTestlog, err)
-				writer = file
-			}
-			defer writerCloser.Close()
-		} else {
-			writer = io.Discard
-		}
-
-		errorChannel := make(chan error)
-		defer close(errorChannel)
-		ctx, stopWda := context.WithCancel(context.Background())
-		go func() {
-			_, err := testmanagerd.RunTestWithConfig(ctx, testmanagerd.TestConfig{
-				BundleId:           bundleID,
-				TestRunnerBundleId: testbundleID,
-				XctestConfigName:   xctestconfig,
-				Env:                wdaenv,
-				Args:               wdaargs,
-				Device:             device,
-				Listener:           testmanagerd.NewTestListener(writer, writer, os.TempDir()),
-			})
-			if err != nil {
-				errorChannel <- err
-			}
-			stopWda()
-		}()
-		c := make(chan os.Signal, 1)
-		signal.Notify(c, syscall.SIGINT, syscall.SIGTERM)
-
-		select {
-		case err := <-errorChannel:
-			log.WithError(err).Error("Failed running WDA")
-			stopWda()
-			os.Exit(1)
-		case <-ctx.Done():
-			log.Error("WDA process ended unexpectedly")
-			os.Exit(1)
-		case signal := <-c:
-			log.Infof("os signal:%d received, closing...", signal)
-			stopWda()
-		}
-		log.Info("Done Closing")
-	}
-	return b
-}
-
-func instrumentsCommand(device ios.DeviceEntry, arguments docopt.Opts) bool {
-	b, _ := arguments.Bool("instruments")
-	if b {
-		listenerFunc, closeFunc, err := instruments.ListenAppStateNotifications(device)
-		if err != nil {
-			log.Fatal(err)
-		}
-		go func() {
-			for {
-				notification, err := listenerFunc()
-				if err != nil {
-					log.Error(err)
-					return
-				}
-				s, _ := json.Marshal(notification)
-				fmt.Println(string(s))
-			}
-		}()
-		c := make(chan os.Signal, 1)
-		signal.Notify(c, syscall.SIGINT, syscall.SIGTERM)
-		<-c
-		err = closeFunc()
-		if err != nil {
-			log.Warnf("timeout during close %v", err)
-		}
-	}
-	return b
 }
 
 func toArgs(argsIn []string) []interface{} {
@@ -1864,44 +534,6 @@ func toEnvs(envsIn []string) map[string]interface{} {
 	return env
 }
 
-func crashCommand(device ios.DeviceEntry, arguments docopt.Opts) bool {
-	b, _ := arguments.Bool("crash")
-	if b {
-		ls, _ := arguments.Bool("ls")
-		if ls {
-			pattern, err := arguments.String("<pattern>")
-			if err != nil || pattern == "" {
-				pattern = "*"
-			}
-			files, err := crashreport.ListReports(device, pattern)
-			exitIfError("failed listing crashreports", err)
-			fmt.Println(
-				convertToJSONString(
-					map[string]interface{}{"files": files, "length": len(files)},
-				),
-			)
-		}
-		cp, _ := arguments.Bool("cp")
-		if cp {
-			pattern, _ := arguments.String("<srcpattern>")
-			target, _ := arguments.String("<target>")
-			log.Debugf("cp %s %s", pattern, target)
-			err := crashreport.DownloadReports(device, pattern, target)
-			exitIfError("failed downloading crashreports", err)
-		}
-
-		rm, _ := arguments.Bool("rm")
-		if rm {
-			cwd, _ := arguments.String("<cwd>")
-			pattern, _ := arguments.String("<pattern>")
-			log.Debugf("rm %s %s", cwd, pattern)
-			err := crashreport.RemoveReports(device, cwd, pattern)
-			exitIfError("failed deleting crashreports", err)
-		}
-	}
-	return b
-}
-
 func deviceState(device ios.DeviceEntry, list bool, enable bool, profileTypeId string, profileId string) {
 	control, err := instruments.NewDeviceStateControl(device)
 	exitIfError("failed to connect to deviceStateControl", err)
@@ -1920,17 +552,17 @@ func deviceState(device ios.DeviceEntry, list bool, enable bool, profileTypeId s
 	if enable {
 		pType, profile, err := instruments.VerifyProfileAndType(profileTypes, profileTypeId, profileId)
 		exitIfError("invalid arguments", err)
-		log.Info("Enabling profile.. (this can take a while for ThermalConditions)")
+		slog.Info("Enabling profile.. (this can take a while for ThermalConditions)")
 		err = control.Enable(pType, profile)
 		exitIfError("could not enable profile", err)
-		log.Infof("Profile %s - %s is active! waiting for SIGTERM..", profileTypeId, profileId)
+		slog.Info(fmt.Sprintf("Profile %s - %s is active! waiting for SIGTERM..", profileTypeId, profileId))
 		c := make(chan os.Signal, syscall.SIGTERM)
 		signal.Notify(c, os.Interrupt)
 		<-c
-		log.Infof("Disabling profiletype %s", profileTypeId)
+		slog.Info(fmt.Sprintf("Disabling profiletype %s", profileTypeId))
 		err = control.Disable(pType)
 		exitIfError("could not disable profile", err)
-		log.Info("ok")
+		slog.Info("ok")
 	}
 }
 
@@ -1959,17 +591,16 @@ func listMountedImages(device ios.DeviceEntry) {
 	signatures, err := conn.ListImages()
 	exitIfError("failed getting image list", err)
 	if len(signatures) == 0 {
-		log.Infof("none")
+		slog.Info("none")
 		return
 	}
 	for _, sig := range signatures {
-		log.Infof("%x", sig)
+		slog.Info("image signature", "signature", fmt.Sprintf("%x", sig))
 	}
 }
 
 func installApp(device ios.DeviceEntry, path string) {
-	log.WithFields(
-		log.Fields{"appPath": path, "device": device.Properties.SerialNumber}).Info("installing")
+	slog.Info("installing", "appPath", path, "device", device.Properties.SerialNumber)
 	conn, err := zipconduit.New(device)
 	exitIfError("failed connecting to zipconduit, dev image installed?", err)
 	err = conn.SendFile(path)
@@ -1977,8 +608,7 @@ func installApp(device ios.DeviceEntry, path string) {
 }
 
 func uninstallApp(device ios.DeviceEntry, bundleId string) {
-	log.WithFields(
-		log.Fields{"appPath": bundleId, "device": device.Properties.SerialNumber}).Info("uninstalling")
+	slog.Info("uninstalling", "appPath", bundleId, "device", device.Properties.SerialNumber)
 	svc, err := installationproxy.New(device)
 	exitIfError("failed connecting to installationproxy", err)
 	err = svc.Uninstall(bundleId)
@@ -1992,7 +622,7 @@ func language(device ios.DeviceEntry, locale string, language string) {
 	err = ios.SetLanguage(device, ios.LanguageConfiguration{Language: language, Locale: locale})
 	exitIfError("failed setting language", err)
 	if lang.Language != language && language != "" {
-		log.Debugf("Language should be changed from %s to %s waiting for Springboard to reboot", lang.Language, language)
+		slog.Debug("Language should be changed waiting for Springboard to reboot", "from", lang.Language, "to", language)
 		notificationproxy.WaitUntilSpringboardStarted(device)
 	}
 	lang, err = ios.GetLanguage(device)
@@ -2009,7 +639,7 @@ func assistiveTouch(device ios.DeviceEntry, operation string, force bool) {
 		exitIfError("failed getting device product version", err)
 
 		if version.LessThan(ios.IOS11()) {
-			log.Errorf("iOS Version 11.0+ required to manipulate AssistiveTouch.  iOS version: %s detected. Use --force to override.", version)
+			slog.Error("iOS Version 11.0+ required to manipulate AssistiveTouch. Use --force to override.", "version", version)
 			os.Exit(1)
 		}
 	}
@@ -2017,7 +647,7 @@ func assistiveTouch(device ios.DeviceEntry, operation string, force bool) {
 	wasEnabled, err := ios.GetAssistiveTouch(device)
 	if err != nil {
 		if force && (operation == "enable" || operation == "disable") {
-			log.WithFields(log.Fields{"error": err}).Warn("Failed getting current AssistiveTouch status. Continuing anyway.")
+			slog.Warn("Failed getting current AssistiveTouch status. Continuing anyway.", "error", err)
 		} else {
 			exitIfError("failed getting current AssistiveTouch status", err)
 		}
@@ -2054,7 +684,7 @@ func voiceOver(device ios.DeviceEntry, operation string, force bool) {
 		exitIfError("failed getting device product version", err)
 
 		if version.LessThan(ios.IOS11()) {
-			log.Errorf("iOS Version 11.0+ required to manipulate VoiceOver.  iOS version: %s detected. Use --force to override.", version)
+			slog.Error("iOS Version 11.0+ required to manipulate VoiceOver. Use --force to override.", "version", version)
 			os.Exit(1)
 		}
 	}
@@ -2063,7 +693,7 @@ func voiceOver(device ios.DeviceEntry, operation string, force bool) {
 
 	if err != nil {
 		if force && (operation == "enable" || operation == "disable") {
-			log.WithFields(log.Fields{"error": err}).Warn("Failed getting current VoiceOver status. Continuing anyway.")
+			slog.Warn("Failed getting current VoiceOver status. Continuing anyway.", "error", err)
 		} else {
 			exitIfError("failed getting current VoiceOver status", err)
 		}
@@ -2100,7 +730,7 @@ func zoomTouch(device ios.DeviceEntry, operation string, force bool) {
 		exitIfError("failed getting device product version", err)
 
 		if version.LessThan(ios.IOS11()) {
-			log.Errorf("iOS Version 11.0+ required to manipulate VoiceOver.  iOS version: %s detected. Use --force to override.", version)
+			slog.Error("iOS Version 11.0+ required to manipulate ZoomTouch. Use --force to override.", "version", version)
 			os.Exit(1)
 		}
 	}
@@ -2109,7 +739,7 @@ func zoomTouch(device ios.DeviceEntry, operation string, force bool) {
 
 	if err != nil {
 		if force && (operation == "enable" || operation == "disable") {
-			log.WithFields(log.Fields{"error": err}).Warn("Failed getting current VoiceOver status. Continuing anyway.")
+			slog.Warn("Failed getting current ZoomTouch status. Continuing anyway.", "error", err)
 		} else {
 			exitIfError("failed getting current VoiceOver status", err)
 		}
@@ -2146,7 +776,7 @@ func timeFormat(device ios.DeviceEntry, operation string, force bool) {
 		exitIfError("failed getting device product version", err)
 
 		if version.LessThan(ios.IOS11()) {
-			log.Errorf("iOS Version 11.0+ required to manipulate Time Format.  iOS version: %s detected. Use --force to override.", version)
+			slog.Error("iOS Version 11.0+ required to manipulate Time Format. Use --force to override.", "version", version)
 			os.Exit(1)
 		}
 	}
@@ -2155,7 +785,7 @@ func timeFormat(device ios.DeviceEntry, operation string, force bool) {
 
 	if err != nil {
 		if force && (operation == "24h" || operation == "12h") {
-			log.WithFields(log.Fields{"error": err}).Warn("Failed getting current TimeFormat value. Continuing anyway.")
+			slog.Warn("Failed getting current TimeFormat value. Continuing anyway.", "error", err)
 		} else {
 			exitIfError("failed getting current TimeFormat value", err)
 		}
@@ -2244,7 +874,7 @@ func startDebugProxy(device ios.DeviceEntry, binaryMode bool) {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				log.Errorf("Recovered a panic: %v", r)
+				slog.Error("Recovered a panic", "panic", r)
 				proxy.Close()
 				debug.PrintStack()
 				os.Exit(1)
@@ -2252,13 +882,13 @@ func startDebugProxy(device ios.DeviceEntry, binaryMode bool) {
 			}
 		}()
 		err := proxy.Launch(device, binaryMode)
-		log.WithFields(log.Fields{"error": err}).Infof("DebugProxy Terminated abnormally")
+		slog.Info("DebugProxy Terminated abnormally", "error", err)
 		os.Exit(0)
 	}()
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
 	<-c
-	log.Info("Shutting down debugproxy")
+	slog.Info("Shutting down debugproxy")
 	proxy.Close()
 }
 
@@ -2267,7 +897,7 @@ func handleProfileRemove(device ios.DeviceEntry, identifier string) {
 	exitIfError("Starting mcInstall failed with", err)
 	err = profileService.RemoveProfile(identifier)
 	exitIfError("failed adding profile", err)
-	log.Infof("profile '%s' removed", identifier)
+	slog.Info(fmt.Sprintf("profile '%s' removed", identifier))
 }
 
 func handleProfileAdd(device ios.DeviceEntry, file string) {
@@ -2277,7 +907,7 @@ func handleProfileAdd(device ios.DeviceEntry, file string) {
 	exitIfError("could not read profile-file", err)
 	err = profileService.AddProfile(filebytes)
 	exitIfError("failed adding profile", err)
-	log.Info("profile installed, you have to accept it in the device settings")
+	slog.Info("profile installed, you have to accept it in the device settings")
 }
 
 func handleProfileAddSupervised(device ios.DeviceEntry, file string, p12file string, p12password string) {
@@ -2289,7 +919,7 @@ func handleProfileAddSupervised(device ios.DeviceEntry, file string, p12file str
 	exitIfError("could not read p12-file", err)
 	err = profileService.AddProfileSupervised(filebytes, p12bytes, p12password)
 	exitIfError("failed adding profile", err)
-	log.Info("profile installed")
+	slog.Info("profile installed")
 }
 
 func handleProfileList(device ios.DeviceEntry) {
@@ -2298,6 +928,68 @@ func handleProfileList(device ios.DeviceEntry) {
 	list, err := profileService.HandleList()
 	exitIfError("failed getting profile list", err)
 	fmt.Println(convertToJSONString(list))
+}
+
+func handleSetWallpaper(device ios.DeviceEntry, imagePath, screen, p12file, p12password string) {
+	if p12file == "" {
+		logFatal("--p12file is required (set-wallpaper needs a supervisor identity)")
+	}
+	screenValue, err := mcinstall.ParseWallpaperScreen(screen)
+	exitIfError("invalid --screen", err)
+	imageBytes, err := os.ReadFile(imagePath)
+	exitIfError("could not read image file", err)
+	p12bytes, err := os.ReadFile(p12file)
+	exitIfError("could not read p12 file", err)
+
+	conn, err := mcinstall.New(device)
+	exitIfError("starting mcinstall failed", err)
+	defer conn.Close()
+
+	err = conn.SetWallpaperSupervised(imageBytes, screenValue, p12bytes, p12password)
+	exitIfError("failed setting wallpaper", err)
+	fmt.Println(convertToJSONString("ok"))
+}
+
+func handleGetWallpaper(device ios.DeviceEntry, output string) {
+	client, err := springboard.NewClient(device)
+	exitIfError("could not connect to springboardservices", err)
+	defer client.Close()
+	pngBytes, err := client.GetHomeScreenWallpaperPNG()
+	exitIfError("could not fetch wallpaper", err)
+	err = os.WriteFile(output, pngBytes, 0o644)
+	exitIfError("could not write wallpaper file", err)
+	fmt.Println(convertToJSONString(map[string]any{"path": output, "bytes": len(pngBytes)}))
+}
+
+func handleGetIconLayout(device ios.DeviceEntry, output string) {
+	client, err := springboard.NewClient(device)
+	exitIfError("could not connect to springboardservices", err)
+	defer client.Close()
+	state, err := client.GetIconLayout("2")
+	exitIfError("could not fetch icon layout", err)
+	jsonBytes, err := json.MarshalIndent(state, "", "  ")
+	exitIfError("could not marshal layout", err)
+	if output == "" {
+		fmt.Println(string(jsonBytes))
+		return
+	}
+	err = os.WriteFile(output, jsonBytes, 0o644)
+	exitIfError("could not write layout file", err)
+	fmt.Println(convertToJSONString(map[string]any{"path": output, "bytes": len(jsonBytes)}))
+}
+
+func handleSetIconLayout(device ios.DeviceEntry, layoutFile string) {
+	raw, err := os.ReadFile(layoutFile)
+	exitIfError("could not read layout file", err)
+	var state any
+	err = json.Unmarshal(raw, &state)
+	exitIfError("layout file is not valid JSON", err)
+	client, err := springboard.NewClient(device)
+	exitIfError("could not connect to springboardservices", err)
+	defer client.Close()
+	err = client.SetIconLayout(state)
+	exitIfError("could not set icon layout", err)
+	fmt.Println(convertToJSONString("ok"))
 }
 
 func startForwarding(device ios.DeviceEntry, hostPort uint16, targetPort uint16) {
@@ -2348,10 +1040,10 @@ func startMultiForwarding(device ios.DeviceEntry, mappings []string) {
 			exitIfError(fmt.Sprintf("failed to forward %d:%d", hostPort, targetPort), err)
 		}
 		listeners = append(listeners, cl)
-		log.Infof("Forwarding %d -> %d", hostPort, targetPort)
+		slog.Info(fmt.Sprintf("Forwarding %d -> %d", hostPort, targetPort))
 	}
 
-	log.Infof("Started %d port forwards", len(listeners))
+	slog.Info(fmt.Sprintf("Started %d port forwards", len(listeners)))
 
 	// Wait for interrupt
 	c := make(chan os.Signal, 1)
@@ -2363,7 +1055,7 @@ func startMultiForwarding(device ios.DeviceEntry, mappings []string) {
 }
 
 func printDiagnostics(device ios.DeviceEntry) {
-	log.Debug("print diagnostics")
+	slog.Debug("print diagnostics")
 	diagnosticsService, err := diagnostics.New(device)
 	exitIfError("Starting diagnostics service failed with", err)
 
@@ -2442,7 +1134,7 @@ func printInstalledApps(device ios.DeviceEntry, system bool, all bool, list bool
 		return
 	}
 	if JSONdisabled {
-		log.Info(response)
+		slog.Info("apps", "apps", response)
 	} else {
 		fmt.Println(convertToJSONString(response))
 	}
@@ -2480,7 +1172,7 @@ func saveScreenshot(device ios.DeviceEntry, outputPath string) {
 	if JSONdisabled {
 		fmt.Println(outputPath)
 	} else {
-		log.WithFields(log.Fields{"outputPath": outputPath}).Info("File saved successfully")
+		slog.Info("File saved successfully", "outputPath", outputPath)
 	}
 }
 
@@ -2572,6 +1264,7 @@ type detailsEntry struct {
 	ProductName    string
 	ProductType    string
 	ProductVersion string
+	ConnectionType string
 }
 
 func outputDetailedList(deviceList ios.DeviceList) {
@@ -2580,7 +1273,13 @@ func outputDetailedList(deviceList ios.DeviceList) {
 		udid := device.Properties.SerialNumber
 		allValues, err := ios.GetValues(device)
 		exitIfError("failed getting values", err)
-		result[i] = detailsEntry{udid, allValues.Value.ProductName, allValues.Value.ProductType, allValues.Value.ProductVersion}
+		result[i] = detailsEntry{
+			Udid:           udid,
+			ProductName:    allValues.Value.ProductName,
+			ProductType:    allValues.Value.ProductType,
+			ProductVersion: allValues.Value.ProductVersion,
+			ConnectionType: device.ConnectionTypeLabel(),
+		}
 	}
 	fmt.Println(convertToJSONString(map[string][]detailsEntry{
 		"deviceList": result,
@@ -2592,7 +1291,7 @@ func outputDetailedListNoJSON(deviceList ios.DeviceList) {
 		udid := device.Properties.SerialNumber
 		allValues, err := ios.GetValues(device)
 		exitIfError("failed getting values", err)
-		fmt.Printf("%s  %s  %s %s\n", udid, allValues.Value.ProductName, allValues.Value.ProductType, allValues.Value.ProductVersion)
+		fmt.Printf("%s  %s  %s  %s  %s\n", udid, allValues.Value.ProductName, allValues.Value.ProductType, allValues.Value.ProductVersion, device.ConnectionTypeLabel())
 	}
 }
 
@@ -2605,7 +1304,7 @@ func outputProcessListNoJSON(device ios.DeviceEntry, processes []instruments.Pro
 	appInfoByExecutableName := make(map[string]installationproxy.AppInfo)
 
 	if err != nil {
-		log.Error("browsing installed apps failed. bundleID will not be included in output")
+		slog.Error("browsing installed apps failed. bundleID will not be included in output")
 	} else {
 		for _, app := range response {
 			appInfoByExecutableName[app.CFBundleExecutable()] = app
@@ -2642,7 +1341,7 @@ func startListening() {
 			deviceConn, err := ios.NewDeviceConnection(ios.GetUsbmuxdSocket())
 			defer deviceConn.Close()
 			if err != nil {
-				log.Errorf("could not connect to %s with err %+v, will retry in 3 seconds...", ios.GetUsbmuxdSocket(), err)
+				slog.Error("could not connect, will retry in 3 seconds...", "socket", ios.GetUsbmuxdSocket(), "error", err)
 				time.Sleep(time.Second * 3)
 				continue
 			}
@@ -2650,7 +1349,7 @@ func startListening() {
 
 			attachedReceiver, err := muxConnection.Listen()
 			if err != nil {
-				log.Error("Failed issuing Listen command, will retry in 3 seconds", err)
+				slog.Error("Failed issuing Listen command, will retry in 3 seconds", "error", err)
 				deviceConn.Close()
 				time.Sleep(time.Second * 3)
 				continue
@@ -2658,7 +1357,7 @@ func startListening() {
 			for {
 				msg, err := attachedReceiver()
 				if err != nil {
-					log.Error("Stopped listening because of error")
+					slog.Error("Stopped listening because of error")
 					break
 				}
 				fmt.Println(convertToJSONString((msg)))
@@ -2677,18 +1376,18 @@ func printDeviceInfo(device ios.DeviceEntry) {
 	}
 	svc, err := instruments.NewDeviceInfoService(device)
 	if err != nil {
-		log.Debugf("could not open instruments, probably dev image not mounted %v", err)
+		slog.Debug("could not open instruments, probably dev image not mounted", "error", err)
 	}
 	if err == nil {
 		info, err := svc.NetworkInformation()
 		if err != nil {
-			log.Debugf("error getting networkinfo from instruments %v", err)
+			slog.Debug("error getting networkinfo from instruments", "error", err)
 		} else {
 			allValues["instruments:networkInformation"] = info
 		}
 		info, err = svc.HardwareInformation()
 		if err != nil {
-			log.Debugf("error getting hardwareinfo from instruments %v", err)
+			slog.Debug("error getting hardwareinfo from instruments", "error", err)
 		} else {
 			allValues["instruments:hardwareInformation"] = info
 		}
@@ -2698,7 +1397,7 @@ func printDeviceInfo(device ios.DeviceEntry) {
 }
 
 func runSyslog(device ios.DeviceEntry, parse bool) {
-	log.Debug("Run Syslog.")
+	slog.Debug("Run Syslog.")
 
 	syslogConnection, err := syslog.New(device)
 	exitIfError("Syslog connection failed", err)
@@ -2731,6 +1430,224 @@ func runSyslog(device ios.DeviceEntry, parse bool) {
 	<-c
 }
 
+func runOsTrace(device ios.DeviceEntry, pid int, processName string, messageFilter uint16, streamFlags uint32, clientFilter ostrace.ClientFilter, follow bool) {
+	slog.Debug("Run OsTrace.")
+	// Note: streaming log messages places significant CPU load on the device.
+
+	formatEntry := func(e ostrace.LogEntry) string {
+		return convertToJSONString(e)
+	}
+	if JSONdisabled {
+		formatEntry = formatEntryPlain
+	}
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt)
+	defer signal.Stop(sigCh)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		<-sigCh
+		cancel()
+	}()
+
+	sleepOrCancel := func(d time.Duration) bool {
+		select {
+		case <-ctx.Done():
+			return true
+		case <-time.After(d):
+			return false
+		}
+	}
+
+	for {
+		if processName != "" && pid == -1 {
+			resolved := false
+			waitingLogged := false
+			for !resolved {
+				service, err := instruments.NewDeviceInfoService(device)
+				if err != nil {
+					if follow {
+						slog.Warn("Failed to open deviceInfoService, retrying...", "error", err)
+						if sleepOrCancel(2 * time.Second) {
+							return
+						}
+						continue
+					}
+					exitIfError("failed opening deviceInfoService for resolving process name", err)
+				}
+				proc, err := service.ProcessByName(processName)
+				service.Close()
+				if err != nil {
+					if follow {
+						if !waitingLogged {
+							slog.Info(fmt.Sprintf("Waiting for process %q to appear...", processName))
+							waitingLogged = true
+						}
+						if sleepOrCancel(2 * time.Second) {
+							return
+						}
+						continue
+					}
+					exitIfError("process not found", err)
+				}
+				pid = int(proc.Pid)
+				slog.Info(fmt.Sprintf("Resolved process %q to PID %d", processName, pid))
+				resolved = true
+			}
+		}
+
+		conn, err := ostrace.New(device, pid, messageFilter, streamFlags)
+		if err != nil {
+			if follow {
+				slog.Warn("os_trace connection failed, retrying...", "error", err)
+				if processName != "" {
+					pid = -1
+				}
+				if sleepOrCancel(2 * time.Second) {
+					return
+				}
+				continue
+			}
+			exitIfError("os_trace connection failed", err)
+		}
+
+		done := make(chan error, 1)
+		reconnect := make(chan struct{}, 1)
+		monitorCtx, monitorCancel := context.WithCancel(ctx)
+
+		if follow && pid > 0 {
+			go func(targetPid int) {
+				ticker := time.NewTicker(3 * time.Second)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-monitorCtx.Done():
+						return
+					case <-ticker.C:
+						if !isProcessAlive(device, uint64(targetPid)) {
+							slog.Info(fmt.Sprintf("Process PID %d no longer running", targetPid))
+							select {
+							case reconnect <- struct{}{}:
+							default:
+							}
+							return
+						}
+					}
+				}
+			}(pid)
+		}
+
+		go func() {
+			for {
+				entry, err := conn.ReadFilteredEntry(clientFilter)
+				if err != nil {
+					done <- err
+					return
+				}
+				fmt.Println(formatEntry(entry))
+			}
+		}()
+
+		select {
+		case <-ctx.Done():
+			monitorCancel()
+			conn.Close()
+			return
+		case <-reconnect:
+			monitorCancel()
+			conn.Close()
+			if processName != "" {
+				slog.Info("os_trace stream ended, reconnecting...")
+				pid = -1
+			} else {
+				slog.Info(fmt.Sprintf("Process PID %d terminated; stopping follow.", pid))
+				return
+			}
+		case err := <-done:
+			monitorCancel()
+			conn.Close()
+			if follow {
+				slog.Warn("os_trace stream ended, reconnecting...", "error", err)
+				if processName != "" {
+					pid = -1
+				}
+				if sleepOrCancel(2 * time.Second) {
+					return
+				}
+				continue
+			}
+			exitIfError("failed reading os_trace entry", err)
+		}
+	}
+}
+
+func colorForLevel(level ostrace.LogLevel) string {
+	switch level {
+	case ostrace.LogLevelInfo:
+		return "\033[36m" // cyan
+	case ostrace.LogLevelDebug:
+		return "\033[90m" // bright black (gray)
+	case ostrace.LogLevelError:
+		return "\033[31m" // red
+	case ostrace.LogLevelFault:
+		return "\033[1;31m" // bold red
+	default:
+		return "" // no color
+	}
+}
+
+func isTerminal(fd int) bool {
+	// golang.org/x/term is cross-platform (Linux/macOS/BSD/Windows), unlike a
+	// raw unix.TCGETS ioctl which only builds on Linux.
+	return term.IsTerminal(fd)
+}
+
+func formatEntryPlain(entry ostrace.LogEntry) string {
+	ts := entry.Timestamp.Format("2006-01-02T15:04:05.000Z07:00")
+	useColor := isTerminal(int(os.Stdout.Fd()))
+	dim, reset, color := "", "", ""
+	if useColor {
+		dim = "\033[90m"
+		reset = "\033[0m"
+		color = colorForLevel(entry.Level)
+	}
+	if entry.Label != nil {
+		return fmt.Sprintf("%s%s%s  %sPID:%-5d%s  %s<%-7s>%s  %s[%s:%s]%s  %s%s%s",
+			dim, ts, reset,
+			dim, entry.PID, reset,
+			color, entry.LevelName, reset,
+			dim, entry.Label.Subsystem, entry.Label.Category, reset,
+			color, entry.Message, reset)
+	}
+	return fmt.Sprintf("%s%s%s  %sPID:%-5d%s  %s<%-7s>%s  %s%s%s",
+		dim, ts, reset,
+		dim, entry.PID, reset,
+		color, entry.LevelName, reset,
+		color, entry.Message, reset)
+}
+
+func isProcessAlive(device ios.DeviceEntry, pid uint64) bool {
+	service, err := instruments.NewDeviceInfoService(device)
+	if err != nil {
+		slog.Warn("isProcessAlive: failed to connect to device", "error", err)
+		return false
+	}
+	defer service.Close()
+	procs, err := service.ProcessList()
+	if err != nil {
+		slog.Warn("isProcessAlive: failed to list processes", "error", err)
+		return false
+	}
+	for _, p := range procs {
+		if p.Pid == pid {
+			return true
+		}
+	}
+	return false
+}
+
 func rawSyslog(log string) string {
 	return log
 }
@@ -2761,17 +1678,17 @@ func pairDevice(device ios.DeviceEntry, orgIdentityP12File string, p12Password s
 	if orgIdentityP12File == "" {
 		err := ios.Pair(device)
 		exitIfError("Pairing failed", err)
-		log.Infof("Successfully paired %s", device.Properties.SerialNumber)
+		slog.Info(fmt.Sprintf("Successfully paired %s", device.Properties.SerialNumber))
 		return
 	}
 	p12, err := os.ReadFile(orgIdentityP12File)
 	exitIfError("Invalid file:"+orgIdentityP12File, err)
 	err = ios.PairSupervised(device, p12, p12Password)
 	exitIfError("Pairing failed", err)
-	log.Infof("Successfully paired %s", device.Properties.SerialNumber)
+	slog.Info(fmt.Sprintf("Successfully paired %s", device.Properties.SerialNumber))
 }
 
-func startTunnel(ctx context.Context, recordsPath string, tunnelInfoPort int, userspaceTUN bool) {
+func startTunnel(ctx context.Context, recordsPath string, tunnelInfoHost string, tunnelInfoPort int, userspaceTUN bool) {
 	pm, err := tunnel.NewPairRecordManager(recordsPath)
 	exitIfError("could not creat pair record manager", err)
 	tm := tunnel.NewTunnelManager(pm, userspaceTUN)
@@ -2786,19 +1703,19 @@ func startTunnel(ctx context.Context, recordsPath string, tunnelInfoPort int, us
 			case <-ticker.C:
 				err := tm.UpdateTunnels(ctx)
 				if err != nil {
-					log.WithError(err).Warn("failed to update tunnels")
+					slog.Warn("failed to update tunnels", "error", err)
 				}
 			}
 		}
 	}()
 
 	go func() {
-		err := tunnel.ServeTunnelInfo(tm, tunnelInfoPort)
+		err := tunnel.ServeTunnelInfo(tm, tunnelInfoHost, tunnelInfoPort)
 		if err != nil {
 			exitIfError("failed to start tunnel server", err)
 		}
 	}()
-	log.Info("Tunnel server started")
+	slog.Info("Tunnel server started")
 	<-ctx.Done()
 }
 
@@ -2847,8 +1764,14 @@ func convertToJSONString(data interface{}) string {
 
 func exitIfError(msg string, err error) {
 	if err != nil {
-		log.WithFields(log.Fields{"err": err}).Fatalf(msg)
+		logFatal(msg, "err", err)
 	}
+}
+
+// logFatal logs at error level and exits with status 1 (slog has no Fatal).
+func logFatal(msg string, args ...any) {
+	slog.Error(msg, args...)
+	os.Exit(1)
 }
 
 func splitKeyValuePairs(envArgs []string, sep string) map[string]interface{} {
@@ -2923,7 +1846,7 @@ func tryParsePKCS12(certBytes []byte, p12Password string) ([]byte, bool) {
 	}
 	_, cert, err := pkcs12.Decode(certBytes, p12Password)
 	if err != nil {
-		log.Debugf("P12 decode failed: %v", err)
+		slog.Debug("P12 decode failed", "error", err)
 		return nil, false
 	}
 	if cert != nil {
